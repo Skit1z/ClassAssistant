@@ -27,12 +27,11 @@ class MonitorService:
     """课堂监控服务 - 核心后台服务"""
 
     def __init__(self):
-        # 内置关键词（点名相关）
-        self.builtin_keywords: List[str] = [
-            "点名", "随机", "抽查", "叫人", "回答", "签到",
-            "哪位同学", "谁来", "站起来", "请回答"
-        ]
-        # 用户自定义关键词（如自己的名字）
+        # 关键词文件路径
+        self.keywords_path = os.path.join(DATA_DIR, "keywords.txt")
+        # 从文件加载关键词
+        self._load_keywords()
+        # 用户自定义关键词（如自己的名字，通过 API 传入）
         self.custom_keywords: List[str] = []
 
         # 录音状态
@@ -50,6 +49,11 @@ class MonitorService:
         # 转录文件路径
         self.transcript_path = os.path.join(DATA_DIR, "class_transcript.txt")
 
+        # ASR 增量文本追踪（避免关键词重复触发）
+        self._last_asr_text: str = ""
+        # 已写入转录文件的文本长度
+        self._written_len: int = 0
+
     def get_all_keywords(self) -> List[str]:
         """获取所有关键词（内置 + 自定义）"""
         return self.builtin_keywords + self.custom_keywords
@@ -57,6 +61,36 @@ class MonitorService:
     def update_custom_keywords(self, keywords: List[str]):
         """更新用户自定义关键词"""
         self.custom_keywords = keywords
+
+    def _load_keywords(self):
+        """从 data/keywords.txt 加载关键词列表"""
+        if os.path.exists(self.keywords_path):
+            with open(self.keywords_path, "r", encoding="utf-8") as f:
+                self.builtin_keywords = [
+                    line.strip() for line in f
+                    if line.strip() and not line.startswith("#")
+                ]
+        else:
+            # 文件不存在，使用默认关键词并创建文件
+            self.builtin_keywords = [
+                "点名", "随机", "抽查", "叫人", "回答", "签到",
+                "哪位同学", "谁来", "站起来", "请回答",
+            ]
+            self._save_default_keywords()
+
+    def _save_default_keywords(self):
+        """创建默认关键词文件"""
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(self.keywords_path, "w", encoding="utf-8") as f:
+            f.write("# 监控关键词列表（每行一个，# 开头为注释）\n")
+            f.write("# 编辑后重启监控或调用 reload_keywords 即可生效\n")
+            for kw in self.builtin_keywords:
+                f.write(kw + "\n")
+
+    def reload_keywords(self):
+        """重新加载关键词文件"""
+        self._load_keywords()
+        return self.get_all_keywords()
 
     def register_websocket(self, ws: WebSocket):
         """注册 WebSocket 连接"""
@@ -105,6 +139,12 @@ class MonitorService:
         # 保存当前事件循环引用，供 ASR 回调使用
         self._loop = asyncio.get_running_loop()
 
+        # 重新加载关键词文件
+        self._load_keywords()
+        # 重置增量追踪状态
+        self._last_asr_text = ""
+        self._written_len = 0
+
         # 清空/初始化转录文件
         with open(self.transcript_path, "w", encoding="utf-8") as f:
             f.write(f"=== 课堂记录 开始于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
@@ -127,6 +167,17 @@ class MonitorService:
             self._asr.stop()
             self._asr = None
 
+        # 将未写入的剩余文本刷入转录文件
+        if self._last_asr_text and self._written_len < len(self._last_asr_text):
+            remaining = self._last_asr_text[self._written_len:].strip()
+            if remaining:
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                try:
+                    with open(self.transcript_path, "a", encoding="utf-8") as f:
+                        f.write(f"[{timestamp}] {remaining}\n")
+                except Exception:
+                    logger.exception("写入转录文件失败")
+
         # 写入结束标记
         with open(self.transcript_path, "a", encoding="utf-8") as f:
             f.write(f"\n\n=== 课堂记录 结束于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
@@ -137,44 +188,64 @@ class MonitorService:
         """
         ASR 识别回调 (可能从非主线程调用)。
 
-        Args:
-            text: 识别到的文本
-            is_final: 是否为一句话的完整结果
+        Seed-ASR 每次返回完整累积文本，因此：
+        - 关键词检测只针对新增文本部分，避免重复触发
+        - 转录文件只写入完整句子，避免大量中间结果
         """
         if not self.is_monitoring or not text.strip():
             return
 
-        # 只处理完整句子，避免中间结果重复写入
-        if not is_final:
-            return
-
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # 写入转录文件
-        try:
-            with open(self.transcript_path, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {text}\n")
-        except Exception:
-            logger.exception("写入转录文件失败")
+        # 计算增量文本（新增部分）
+        prev = self._last_asr_text
+        if len(text) >= len(prev) and text[:len(prev)] == prev:
+            delta = text[len(prev):]
+        else:
+            # 文本被重置或修正，整段视为新文本
+            delta = text
+            self._written_len = 0
+        self._last_asr_text = text
 
-        # 检查关键词
-        matched = self._check_keywords(text)
-        if matched and self._loop:
-            alert = {
-                "type": "keyword_alert",
-                "keywords": matched,
-                "text": text,
-                "timestamp": timestamp,
-            }
-            # 线程安全地调度广播协程
-            asyncio.run_coroutine_threadsafe(self._broadcast_alert(alert), self._loop)
-        #
-        # === OpenAI Whisper API ===
-        # from openai import OpenAI
-        # client = OpenAI()
-        # transcription = client.audio.transcriptions.create(
-        #     model="whisper-1", file=audio_file
-        # )
-        # return transcription.text
+        # 写入转录文件（只写完整句子）
+        self._write_transcript(text, timestamp)
 
-        return ""  # Mock: 返回空字符串（静默）
+        # 关键词检测：只检查增量文本
+        if delta.strip():
+            matched = self._check_keywords(delta)
+            if matched and self._loop:
+                alert = {
+                    "type": "keyword_alert",
+                    "keywords": matched,
+                    "text": text,
+                    "timestamp": timestamp,
+                }
+                asyncio.run_coroutine_threadsafe(
+                    self._broadcast_alert(alert), self._loop
+                )
+
+    def _write_transcript(self, full_text: str, timestamp: str):
+        """将新完成的句子写入转录文件（忽略中间结果）"""
+        if len(full_text) < self._written_len:
+            # 文本被重置，重新开始追踪
+            self._written_len = 0
+
+        new_text = full_text[self._written_len:]
+        if not new_text:
+            return
+
+        # 找最后一个句子结束标点的位置
+        last_boundary = -1
+        for i, ch in enumerate(new_text):
+            if ch in "。？！；\n":
+                last_boundary = i
+
+        if last_boundary >= 0:
+            to_write = new_text[:last_boundary + 1].strip()
+            self._written_len += last_boundary + 1
+            if to_write:
+                try:
+                    with open(self.transcript_path, "a", encoding="utf-8") as f:
+                        f.write(f"[{timestamp}] {to_write}\n")
+                except Exception:
+                    logger.exception("写入转录文件失败")

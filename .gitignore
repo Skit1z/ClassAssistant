@@ -20,6 +20,7 @@ api-service/.env
 
 # ---- 运行时数据 ----
 data/*.txt
+!data/keywords.txt
 data/summaries/
 
 # ---- IDE ----

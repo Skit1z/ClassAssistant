@@ -62,7 +62,19 @@ async def get_keywords():
     return {
         "builtin": monitor_service.builtin_keywords,
         "custom": monitor_service.custom_keywords,
-        "all": monitor_service.get_all_keywords()
+        "all": monitor_service.get_all_keywords(),
+        "file": monitor_service.keywords_path,
+    }
+
+
+@router.post("/reload_keywords")
+async def reload_keywords():
+    """重新加载关键词文件（编辑 keywords.txt 后调用）"""
+    all_kw = monitor_service.reload_keywords()
+    return {
+        "status": "success",
+        "keywords": all_kw,
+        "file": monitor_service.keywords_path,
     }
 
 

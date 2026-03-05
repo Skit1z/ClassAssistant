@@ -192,7 +192,8 @@ class SeedASR(BaseASR):
     通过 WebSocket 二进制协议流式交互
     """
 
-    WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+    # WS_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+    WS_URL = os.getenv("SEED_ASR_WS_URL", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async")
 
     def __init__(self, on_text: Callable[[str, bool], None]):
         super().__init__(on_text)
@@ -290,7 +291,7 @@ class SeedASR(BaseASR):
 
         app_key = os.getenv("SEED_ASR_APP_KEY", "")
         access_key = os.getenv("SEED_ASR_ACCESS_KEY", "")
-        resource_id = os.getenv("SEED_ASR_RESOURCE_ID", "volc.bigasr.sauc.duration")
+        resource_id = os.getenv("SEED_ASR_RESOURCE_ID", "volc.seedasr.sauc.duration")
 
         if not app_key or not access_key:
             logger.error("[SeedASR] SEED_ASR_APP_KEY / SEED_ASR_ACCESS_KEY not set")
