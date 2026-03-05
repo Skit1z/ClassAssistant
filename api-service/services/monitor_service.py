@@ -51,8 +51,8 @@ class MonitorService:
 
         # ASR 增量文本追踪（避免关键词重复触发）
         self._last_asr_text: str = ""
-        # 已写入转录文件的文本长度
-        self._written_len: int = 0
+        # 转录文件中"已固定"的字节位置（活动行起始处）
+        self._live_line_pos: int = 0
 
     def get_all_keywords(self) -> List[str]:
         """获取所有关键词（内置 + 自定义）"""
@@ -143,11 +143,14 @@ class MonitorService:
         self._load_keywords()
         # 重置增量追踪状态
         self._last_asr_text = ""
-        self._written_len = 0
+        self._live_line_pos = 0
+        # 已固定到转录文件的 ASR 文本长度
+        self._finalized_len: int = 0
 
-        # 清空/初始化转录文件
+        # 清空/初始化转录文件，记录活动行起始位置
         with open(self.transcript_path, "w", encoding="utf-8") as f:
             f.write(f"=== 课堂记录 开始于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n\n")
+            self._live_line_pos = f.tell()
 
         # 创建 ASR 实例并启动
         self._asr = create_asr(on_text=self._on_asr_text)
@@ -167,16 +170,17 @@ class MonitorService:
             self._asr.stop()
             self._asr = None
 
-        # 将未写入的剩余文本刷入转录文件
-        if self._last_asr_text and self._written_len < len(self._last_asr_text):
-            remaining = self._last_asr_text[self._written_len:].strip()
-            if remaining:
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                try:
-                    with open(self.transcript_path, "a", encoding="utf-8") as f:
-                        f.write(f"[{timestamp}] {remaining}\n")
-                except Exception:
-                    logger.exception("写入转录文件失败")
+        # 固定最后的活动行（如果有未固定的内容）
+        remaining = self._last_asr_text[self._finalized_len:].strip()
+        if remaining:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            try:
+                with open(self.transcript_path, "r+", encoding="utf-8") as f:
+                    f.seek(self._live_line_pos)
+                    f.truncate()
+                    f.write(f"[{timestamp}] {remaining}\n")
+            except Exception:
+                logger.exception("写入转录文件失败")
 
         # 写入结束标记
         with open(self.transcript_path, "a", encoding="utf-8") as f:
@@ -188,26 +192,27 @@ class MonitorService:
         """
         ASR 识别回调 (可能从非主线程调用)。
 
-        Seed-ASR 每次返回完整累积文本，因此：
+        实时更新转录文件：
+        - 每次回调都更新当前活动行（原地覆盖）
+        - 遇到句末标点时固定该行，开始新的活动行
         - 关键词检测只针对新增文本部分，避免重复触发
-        - 转录文件只写入完整句子，避免大量中间结果
         """
         if not self.is_monitoring or not text.strip():
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # 计算增量文本（新增部分）
+        # 计算增量文本（新增部分）—— 用于关键词检测
         prev = self._last_asr_text
         if len(text) >= len(prev) and text[:len(prev)] == prev:
             delta = text[len(prev):]
         else:
             # 文本被重置或修正，整段视为新文本
             delta = text
-            self._written_len = 0
+            self._finalized_len = 0
         self._last_asr_text = text
 
-        # 写入转录文件（只写完整句子）
+        # 实时更新转录文件
         self._write_transcript(text, timestamp)
 
         # 关键词检测：只检查增量文本
@@ -225,27 +230,45 @@ class MonitorService:
                 )
 
     def _write_transcript(self, full_text: str, timestamp: str):
-        """将新完成的句子写入转录文件（忽略中间结果）"""
-        if len(full_text) < self._written_len:
-            # 文本被重置，重新开始追踪
-            self._written_len = 0
+        """
+        实时更新转录文件。
 
-        new_text = full_text[self._written_len:]
-        if not new_text:
+        策略：
+        - 从 full_text[_finalized_len:] 中检查是否有新的句子结束标点
+        - 有则固定这些句子为永久行，更新 _live_line_pos
+        - 剩余未完成的部分作为活动行，原地覆盖（seek + truncate）
+        """
+        pending = full_text[self._finalized_len:]
+        if not pending:
             return
 
-        # 找最后一个句子结束标点的位置
-        last_boundary = -1
-        for i, ch in enumerate(new_text):
-            if ch in "。？！；\n":
-                last_boundary = i
+        try:
+            with open(self.transcript_path, "r+", encoding="utf-8") as f:
+                # 定位到活动行起始位置，截断后面的内容
+                f.seek(self._live_line_pos)
+                f.truncate()
 
-        if last_boundary >= 0:
-            to_write = new_text[:last_boundary + 1].strip()
-            self._written_len += last_boundary + 1
-            if to_write:
-                try:
-                    with open(self.transcript_path, "a", encoding="utf-8") as f:
-                        f.write(f"[{timestamp}] {to_write}\n")
-                except Exception:
-                    logger.exception("写入转录文件失败")
+                # 在 pending 中找所有句子边界
+                last_boundary = -1
+                for i, ch in enumerate(pending):
+                    if ch in "。？！；\n":
+                        last_boundary = i
+
+                if last_boundary >= 0:
+                    # 固定已完成的句子
+                    finalized = pending[:last_boundary + 1].strip()
+                    if finalized:
+                        f.write(f"[{timestamp}] {finalized}\n")
+                    self._finalized_len += last_boundary + 1
+                    # 更新活动行起始位置
+                    self._live_line_pos = f.tell()
+                    # 剩余未完成部分
+                    remainder = pending[last_boundary + 1:]
+                else:
+                    remainder = pending
+
+                # 写入活动行（未完成的部分，下次会被覆盖）
+                if remainder.strip():
+                    f.write(f"[{timestamp}] {remainder.strip()}")
+        except Exception:
+            logger.exception("写入转录文件失败")
