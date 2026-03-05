@@ -195,6 +195,71 @@ ClassAssistant/
 | PDF | `.pdf` | pypdf |
 | Word | `.docx` | python-docx |
 
+## 📥 下载安装（免开发环境）
+
+如果你不想配置开发环境，可以直接使用打包好的 exe 版本。
+
+### 1. 下载发布包
+
+从 [GitHub Releases](https://github.com/ouyangyipeng/ClassAssistant/releases) 下载最新的 `ClassAssistant-v0.1.0-win-x64.zip`。
+
+### 2. 解压
+
+将 zip 解压到任意目录，得到以下结构：
+
+```
+ClassAssistant-v0.1.0/
+├── 启动.bat                     # 双击启动
+├── 上课摸鱼搭子.exe              # 前端桌面窗口
+├── backend/                     # 后端服务
+│   ├── class-assistant-backend.exe
+│   ├── .env.example             # 配置模板
+│   └── _internal/               # 运行时依赖（勿删）
+└── data/                        # 运行时数据目录
+    └── summaries/
+```
+
+### 3. 配置 API 密钥
+
+首次运行会自动从 `.env.example` 创建 `backend/.env` 并用记事本打开，填入你的密钥：
+
+```env
+# 必填：ASR 语音识别（任选一种）
+ASR_MODE=seed-asr
+SEED_ASR_APP_KEY=你的AppKey
+SEED_ASR_ACCESS_KEY=你的AccessKey
+
+# 必填：LLM 大模型（救场 + 总结功能需要）
+LLM_BASE_URL=https://api.deepseek.com
+LLM_API_KEY=你的Key
+LLM_MODEL=deepseek-chat
+```
+
+> 若只想测试 UI 不需要真实识别，将 `ASR_MODE` 设为 `mock` 即可，无需其他密钥。
+
+### 4. 启动
+
+双击 **`启动.bat`**，它会：
+1. 自动启动后端服务（黑色命令行窗口）
+2. 等待 3 秒后启动前端桌面悬浮窗
+
+### 5. 使用
+
+- 📄 **上传资料** → 选择课件文件（PPT/PDF/Word）
+- 🎣 **开始摸鱼** → 开启麦克风监听
+- 🚨 检测到点名 → 红色警报弹出
+- 🆘 **救场** → AI 给出参考答案
+- 📝 下课后点击 → 生成课堂笔记
+
+### 常见问题
+
+| 问题 | 解决方案 |
+|------|----------|
+| 后端窗口闪退 | 检查 `backend/.env` 是否正确配置 |
+| 无法录音 | Windows 设置 → 隐私 → 麦克风 → 允许应用访问 |
+| 前端窗口不出现 | 检查后端是否已启动（浏览器访问 http://127.0.0.1:8765/docs） |
+| 杀毒软件拦截 | exe 是 PyInstaller/Tauri 打包产物，添加信任即可 |
+
 ## ⚠️ 注意事项
 
 - `.env` 文件包含 API 密钥，**请勿提交到 Git**
