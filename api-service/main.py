@@ -8,9 +8,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
+import sys
 
-# 加载环境变量
-load_dotenv()
+# 加载环境变量 —— 明确指定 .env 路径，避免打包版加载到开发目录的 .env
+if getattr(sys, 'frozen', False):
+    _dotenv_path = os.path.join(os.path.dirname(sys.executable), '.env')
+else:
+    _dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(_dotenv_path)
 
 # 创建 FastAPI 应用实例
 app = FastAPI(
@@ -28,9 +33,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 确保 data 目录存在
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+# 确保 data 目录存在（由 config.py 自动创建）
+from config import DATA_DIR
 
 # ---- 注册路由 (后续步骤中实现) ----
 from routers import ppt_router, monitor_router, rescue_router, summary_router
@@ -50,11 +54,10 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """健康检查"""
-    return {"status": "healthy"}
+    return {"status": "healthy", "data_dir": DATA_DIR}
 
 
 if __name__ == "__main__":
-    import sys
     import uvicorn
 
     # PyInstaller console=False 时 stdout/stderr 为 None，需重定向防止崩溃

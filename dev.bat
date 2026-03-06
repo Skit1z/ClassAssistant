@@ -6,7 +6,7 @@ echo ======================================
 echo.
 
 echo [1/2] 启动后端服务 (FastAPI)...
-start "ClassAssistant-Backend" cmd /k "cd /d %~dp0api-service && .venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8765 --reload"
+start "ClassAssistant-Backend" cmd /c "cd /d %~dp0api-service && .venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8765 --reload"
 
 echo       等待后端就绪...
 timeout /t 4 >nul
@@ -14,3 +14,9 @@ timeout /t 4 >nul
 echo [2/2] 启动前端 Tauri 开发模式...
 cd /d %~dp0app-ui
 npm run tauri dev
+
+echo.
+echo [清理] 关闭后端服务...
+taskkill /FI "WINDOWTITLE eq ClassAssistant-Backend" /F >nul 2>&1
+:: 兜底：按端口杀残留进程
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8765 " ^| findstr "LISTENING"') do taskkill /PID %%a /F >nul 2>&1

@@ -9,6 +9,7 @@ import TitleBar from "./components/TitleBar";
 import ToolBar from "./components/ToolBar";
 import AlertOverlay from "./components/AlertOverlay";
 import RescuePanel from "./components/RescuePanel";
+import CatchupPanel from "./components/CatchupPanel";
 import ToastContainer, { type ToastMessage } from "./components/Toast";
 import { useWebSocket } from "./hooks/useWebSocket";
 import {
@@ -26,6 +27,7 @@ export default function App() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showRescuePanel, setShowRescuePanel] = useState(false);
+  const [showCatchupPanel, setShowCatchupPanel] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // WebSocket 连接
@@ -112,6 +114,16 @@ export default function App() {
     setShowRescuePanel(false);
   }, []);
 
+  // ---- 老师讲到哪了 ----
+  const handleCatchup = useCallback(() => {
+    setShowCatchupPanel(true);
+  }, []);
+
+  // ---- 关闭进度面板 ----
+  const handleCloseCatchup = useCallback(() => {
+    setShowCatchupPanel(false);
+  }, []);
+
   // ---- 课后总结 ----
   const handleSummary = useCallback(async () => {
     setIsLoading(true);
@@ -133,19 +145,23 @@ export default function App() {
       {/* 标题栏 */}
       <TitleBar isMonitoring={isMonitoring} />
 
-      {/* 工具栏（非救场模式时显示） */}
-      {!showRescuePanel && (
+      {/* 工具栏（非救场/进度模式时显示） */}
+      {!showRescuePanel && !showCatchupPanel && (
         <ToolBar
           isMonitoring={isMonitoring}
           isLoading={isLoading}
           onUpload={handleUpload}
           onToggleMonitor={handleToggleMonitor}
           onSummary={handleSummary}
+          onCatchup={handleCatchup}
         />
       )}
 
       {/* 救场面板 */}
       <RescuePanel visible={showRescuePanel} onClose={handleCloseRescue} />
+
+      {/* 课堂进度面板 */}
+      <CatchupPanel visible={showCatchupPanel} onClose={handleCloseCatchup} />
 
       {/* 点名警报覆盖层 */}
       <AlertOverlay

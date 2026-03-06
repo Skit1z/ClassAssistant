@@ -51,6 +51,7 @@ a = Analysis(
         'services.ppt_service',
         'services.transcript_service',
         'services.keyword_service',
+        'config',
         'pyaudio',
         'pptx',
         'pypdf',

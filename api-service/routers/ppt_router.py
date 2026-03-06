@@ -7,11 +7,9 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from services.ppt_service import parse_material
 import os
+from config import DATA_DIR
 
 router = APIRouter()
-
-# data 目录路径
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 
 # 支持的文件扩展名
 ALLOWED_EXTENSIONS = ('.pptx', '.ppt', '.pdf', '.docx', '.doc')

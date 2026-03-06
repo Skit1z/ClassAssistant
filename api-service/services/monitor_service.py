@@ -15,12 +15,10 @@ from typing import List, Set
 
 from fastapi import WebSocket
 
-from services.asr_service import create_asr, BaseASR
+from config import DATA_DIR
+from services.asr_service import create_asr, BaseASR, LocalASR
 
 logger = logging.getLogger(__name__)
-
-# data 目录路径
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 
 
 class MonitorService:
@@ -153,7 +151,10 @@ class MonitorService:
             self._live_line_pos = f.tell()
 
         # 创建 ASR 实例并启动
+        # 本地 ASR 使用独立的回调（每句新建一行），线上 ASR 使用流式回调
         self._asr = create_asr(on_text=self._on_asr_text)
+        if isinstance(self._asr, LocalASR):
+            self._asr.on_text = self._on_local_asr_text
         self._asr.start()
 
         return {"status": "started", "message": "开始摸鱼模式 🎣 录音和监控已启动"}
@@ -188,26 +189,70 @@ class MonitorService:
 
         return {"status": "stopped", "message": "监控已停止"}
 
-    def _on_asr_text(self, text: str, is_final: bool):
+    def _check_last_lines_keywords(self) -> List[str]:
         """
-        ASR 识别回调 (可能从非主线程调用)。
+        只检查转录文件最近两行的关键词，避免历史文本反复触发。
+        """
+        try:
+            with open(self.transcript_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            # 取最后两行有效内容
+            recent = [l.strip() for l in lines[-2:] if l.strip() and not l.startswith("===")]
+            text = " ".join(recent)
+            return self._check_keywords(text) if text else []
+        except Exception:
+            return []
 
-        实时更新转录文件：
-        - 每次回调都更新当前活动行（原地覆盖）
-        - 遇到句末标点时固定该行，开始新的活动行
-        - 关键词检测只针对新增文本部分，避免重复触发
+    def _on_local_asr_text(self, text: str, is_final: bool):
+        """
+        本地 ASR 识别回调 - 每识别一句话就追加一行到转录文件。
+        不使用流式覆盖逻辑，因为本地 ASR 是分段式识别。
         """
         if not self.is_monitoring or not text.strip():
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
 
-        # 计算增量文本（新增部分）—— 用于关键词检测
+        # 追加新行
+        try:
+            with open(self.transcript_path, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {text.strip()}\n")
+        except Exception:
+            logger.exception("写入转录文件失败")
+
+        # 关键词检测：只检查最近两行
+        matched = self._check_last_lines_keywords()
+        if matched and self._loop:
+            alert = {
+                "type": "keyword_alert",
+                "keywords": matched,
+                "text": text,
+                "timestamp": timestamp,
+            }
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast_alert(alert), self._loop
+            )
+
+    def _on_asr_text(self, text: str, is_final: bool):
+        """
+        ASR 识别回调 (可能从非主线程调用) —— 用于线上流式 ASR。
+
+        实时更新转录文件：
+        - 每次回调都更新当前活动行（原地覆盖）
+        - 遇到句末标点时固定该行，开始新的活动行
+        - 关键词检测只检查转录文件最近两行，避免重复触发
+        """
+        if not self.is_monitoring or not text.strip():
+            return
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        logger.info("[ASR] on_text (len=%d): %s", len(text), text[:60])
+
+        # 计算增量文本（新增部分）
         prev = self._last_asr_text
         if len(text) >= len(prev) and text[:len(prev)] == prev:
             delta = text[len(prev):]
         else:
-            # 文本被重置或修正，整段视为新文本
             delta = text
             self._finalized_len = 0
         self._last_asr_text = text
@@ -215,9 +260,9 @@ class MonitorService:
         # 实时更新转录文件
         self._write_transcript(text, timestamp)
 
-        # 关键词检测：只检查增量文本
+        # 关键词检测：只检查转录文件最近两行
         if delta.strip():
-            matched = self._check_keywords(delta)
+            matched = self._check_last_lines_keywords()
             if matched and self._loop:
                 alert = {
                     "type": "keyword_alert",

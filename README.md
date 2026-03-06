@@ -14,6 +14,7 @@
 | 🚨 点名预警 | 检测到点名关键词时，窗口闪红光 + 置顶提醒 |
 | 🔧 自定义关键词 | 编辑 `data/keywords.txt` 即可自定义监控词，实时生效 |
 | 🆘 一键救场 | 调用 LLM 分析课堂上下文，快速给出老师问题的参考答案 |
+| 📍 老师讲到哪了 | 一键 AI 总结当前课堂进度，快速回到上下文 |
 | 📝 课后总结 | 一键生成 Markdown 格式的课堂笔记 |
 | 📄 资料上传 | 支持上传 PPT / PDF / Word 课件，辅助 AI 理解课堂内容 |
 
@@ -24,7 +25,7 @@
 │   Tauri 2.0 桌面端   │ ◄─────────────────────────► │   FastAPI 后端服务     │
 │   React 19 + TS     │                              │   Python 3.11        │
 │   TailwindCSS 4     │                              │                      │
-│   无边框悬浮窗       │                              │   ASR: Seed-ASR      │
+│   无边框悬浮窗       │                              │   ASR: Local/Seed-ASR│
 │                     │                              │   LLM: OpenAI API    │
 └─────────────────────┘                              │   Audio: PyAudio     │
                                                      └──────────────────────┘
@@ -60,10 +61,10 @@ python -m venv .venv
 复制 `api-service/.env.example`（或手动创建 `api-service/.env`）：
 
 ```env
-# ASR 模式: mock | dashscope | seed-asr
-ASR_MODE=seed-asr
+# ASR 模式: local | mock | dashscope | seed-asr
+ASR_MODE=local
 
-# Seed-ASR (字节跳动)
+# Seed-ASR (字节跳动) — ASR_MODE=seed-asr 时需要
 SEED_ASR_APP_KEY=your_app_key
 SEED_ASR_ACCESS_KEY=your_access_key
 SEED_ASR_RESOURCE_ID=volc.bigasr.sauc.duration
@@ -122,12 +123,12 @@ GET http://127.0.0.1:8765/api/check_mic
   "device": "Microphone (Realtek Audio)",
   "sample_rate": 44100,
   "channels": 2,
-  "message": "麦克风可用: Microphone (Realtek Audio)"
+- 修复打包版数据误写到开发目录：发布包启动前自动清理 8765 端口占用进程，避免前端连到开发后端
 }
 ```
 
-### API 文档
-
+- `build.ps1` 一键打包脚本：自动同步版本号 → PyInstaller → Tauri → 组装 release → 健康检查验证 → zip
+- `启动.bat` 智能启动：自动创建 `.env`、清理残留进程、后台运行后端，并使用解压目录下的相对 `data` 目录
 后端启动后访问 Swagger UI：
 ```
 http://127.0.0.1:8765/docs
@@ -151,17 +152,25 @@ ClassAssistant/
 │   │   ├── rescue_router.py   # 紧急救场
 │   │   └── summary_router.py  # 课后总结
 │   ├── services/               # 业务逻辑
-│   │   ├── asr_service.py     # ASR 语音识别 (Mock/DashScope/Seed-ASR)
+│   │   ├── asr_service.py     # ASR 语音识别 (Local/Mock/DashScope/Seed-ASR)
 │   │   ├── llm_service.py     # LLM 大模型调用
 │   │   ├── monitor_service.py # 核心监控服务
 │   │   ├── ppt_service.py     # 课件解析 (PPT/PDF/Word)
+│   │   ├── keyword_service.py # 关键词检测服务
 │   │   └── transcript_service.py # 转录管理
+│   ├── config.py               # 全局配置 (路径兼容开发/打包模式)
 │   ├── requirements.txt
 │   └── .env                    # 环境变量 (不提交到 Git)
 ├── app-ui/                     # Tauri + React 前端
 │   ├── src/
 │   │   ├── App.tsx             # 主组件
 │   │   ├── components/         # UI 组件
+│   │   │   ├── ToolBar.tsx    # 工具按钮
+│   │   │   ├── AlertOverlay.tsx # 点名红色警报
+│   │   │   ├── RescuePanel.tsx  # LLM 救场面板
+│   │   │   ├── CatchupPanel.tsx # 老师讲到哪了面板
+│   │   │   ├── Toast.tsx        # Toast 通知
+│   │   │   └── TitleBar.tsx     # 自定义拖拽标题栏
 │   │   ├── hooks/              # WebSocket 管理
 │   │   └── services/           # API 客户端
 │   └── src-tauri/              # Rust Tauri 配置
@@ -182,12 +191,14 @@ ClassAssistant/
 4. 点击 **🎣 开始摸鱼** 开启语音监控
 5. 老师点名时 → 🚨 红色警报弹出
 6. 点击 **🆘 救场** → AI 分析课堂内容并给出参考答案
-7. 下课后点击 **📝** → 自动生成课堂笔记
+7. 点击 **📍 老师讲到哪了** → AI 总结课堂进度，快速跟上
+8. 下课后点击 **📝** → 自动生成课堂笔记
 
 ## 📋 支持的 ASR 服务
 
 | 模式 | 提供商 | 说明 |
 |------|--------|------|
+| `local` | Google Speech API | 免费语音识别，无需密钥，需联网（默认） |
 | `mock` | - | 空实现，用于 UI 开发测试 |
 | `dashscope` | 阿里云百炼 | Fun-ASR 实时语音识别 |
 | `seed-asr` | 字节跳动 | Seed-ASR 大模型，精度更高 |
@@ -231,9 +242,7 @@ ClassAssistant-vX.X.X/
 
 ```env
 # 必填：ASR 语音识别（任选一种）
-ASR_MODE=seed-asr
-SEED_ASR_APP_KEY=你的AppKey
-SEED_ASR_ACCESS_KEY=你的AccessKey
+ASR_MODE=local
 
 # 必填：LLM 大模型（救场 + 总结功能需要）
 LLM_BASE_URL=https://api.deepseek.com
@@ -275,6 +284,27 @@ LLM_MODEL=deepseek-chat
 - 需要网络连接才能使用 ASR 和 LLM 服务
 - 麦克风权限需要在系统设置中开启
 
-## 📄 License
+## � 更新日志
+
+### v1.0.0 (2026-03-06)
+
+**新增功能**
+- 🎙️ **本地免费 ASR**：新增 `local` 模式，使用 Google Speech API，无需密钥即可使用语音识别（默认模式）
+- 📍 **"老师讲到哪了"**：摸鱼模式下新增进度查询按钮，AI 总结当前课堂进度
+- 🔑 **关键词检测优化**：仅检查转录文件最近两行，避免历史文本反复触发警报
+- 📝 **本地 ASR 逐句记录**：每识别一句话追加新行，不再覆盖式更新
+- 🏗️ **全局路径配置**：新增 `config.py`，统一管理 `DATA_DIR`，兼容开发模式和 PyInstaller 打包模式
+
+**Bug 修复**
+- 修复 SeedASR 在线识别无文字输出：拆分收发为独立线程，解决 send/recv 阻塞问题
+- 修复打包版 `.env` 加载到开发目录：`load_dotenv()` 改为显式指定路径
+- 修复打包版启动脚本端口冲突：启动前自动清理残留后端进程
+- 修复 `dev.bat` 关闭后后端窗口不消失：改用 `cmd /c` + 退出时自动 `taskkill`
+
+**打包优化**
+- `build.ps1` 一键打包脚本：自动同步版本号 → PyInstaller → Tauri → 组装 release → 验证 → zip
+- `启动.bat` 智能启动：自动创建 `.env`、清理残留进程、后台运行后端
+
+## �📄 License
 
 MIT

@@ -182,8 +182,15 @@ if not exist "%~dp0data\summaries" mkdir "%~dp0data\summaries"
 :: 清理 PATH 中的 tesseract，避免损坏的 DLL 被加载
 set "PATH=%PATH:tesseract=%"
 
+:: 清理占用 8765 端口的所有进程（无论 dev 还是上次残留）
+taskkill /IM class-assistant-backend.exe /F >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8765 " ^| findstr "LISTENING"') do taskkill /PID %%a /F >nul 2>&1
+timeout /t 1 >nul
+
 :: 后台启动后端（无窗口）
-start /b "" cmd /c "cd /d %%~dp0backend && class-assistant-backend.exe" >nul 2>&1
+cd /d "%~dp0backend"
+start /b "" class-assistant-backend.exe
+cd /d "%~dp0"
 
 :: 等待后端就绪
 ping -n 4 127.0.0.1 >nul 2>&1
@@ -201,10 +208,59 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 Write-Host "      启动脚本已生成" -ForegroundColor Green
 
 # ================================================
-# [6/6] 压缩为 zip
+# [6/7] 验证后端可启动
 # ================================================
 Write-Host ""
-Write-Host "[6/6] 压缩为 $DIST_NAME.zip ..." -ForegroundColor Yellow
+Write-Host "[6/7] 验证打包后端可正常启动 ..." -ForegroundColor Yellow
+
+# 使用临时 .env 和专用端口，避免与开发环境冲突
+$testPort = 18765
+$testEnv = Join-Path $RELEASE_DIR "backend\.env"
+$testEnvContent = "API_PORT=$testPort`nASR_MODE=mock`n"
+[IO.File]::WriteAllText($testEnv, $testEnvContent)
+
+$backendExe = Join-Path $RELEASE_DIR "backend\class-assistant-backend.exe"
+$proc = $null
+$testOk = $false
+
+try {
+    $proc = Start-Process -FilePath $backendExe -WorkingDirectory (Join-Path $RELEASE_DIR "backend") -PassThru -WindowStyle Hidden
+    Start-Sleep -Seconds 5
+
+    if ($proc.HasExited) {
+        Write-Host "      [失败] 后端进程启动后立即退出 (exit code: $($proc.ExitCode))" -ForegroundColor Red
+    } else {
+        try {
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$testPort/api/health" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) {
+                Write-Host "      [通过] 后端健康检查 OK" -ForegroundColor Green
+                $testOk = $true
+            } else {
+                Write-Host "      [失败] 健康检查返回 $($resp.StatusCode)" -ForegroundColor Red
+            }
+        } catch {
+            Write-Host "      [失败] 无法连接后端: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+} catch {
+    Write-Host "      [失败] 启动后端失败: $($_.Exception.Message)" -ForegroundColor Red
+} finally {
+    if ($proc -and !$proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $testEnv) { Remove-Item $testEnv -Force }
+}
+
+if (-not $testOk) {
+    Write-Host ""
+    Write-Host "      后端验证失败，请检查问题后重新打包！" -ForegroundColor Red
+    Write-Host "      release 目录已保留用于调试：$RELEASE_DIR" -ForegroundColor Yellow
+    exit 1
+}
+
+# ================================================
+# [7/7] 压缩为 zip
+# ================================================
+Write-Host ""
+Write-Host "[7/7] 压缩为 $DIST_NAME.zip ..." -ForegroundColor Yellow
 
 $zipPath = Join-Path $ROOT "$DIST_NAME.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }

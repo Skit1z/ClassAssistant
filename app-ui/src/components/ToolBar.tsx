@@ -17,6 +17,8 @@ interface ToolBarProps {
   onToggleMonitor: () => void;
   /** 点击生成总结 */
   onSummary: () => void;
+  /** 点击"老师讲到哪了" */
+  onCatchup: () => void;
 }
 
 export default function ToolBar({
@@ -25,6 +27,7 @@ export default function ToolBar({
   onUpload,
   onToggleMonitor,
   onSummary,
+  onCatchup,
 }: ToolBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -99,6 +102,22 @@ export default function ToolBar({
           title="生成课后总结笔记"
         >
           📝
+        </button>
+      )}
+
+      {/* 老师讲到哪了（仅在监控中显示） */}
+      {isMonitoring && (
+        <button
+          onClick={onCatchup}
+          disabled={isLoading}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg
+                     bg-indigo-500/20 text-indigo-300 border border-indigo-500/30
+                     hover:bg-indigo-500/30 hover:border-indigo-400/50
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-all duration-200 backdrop-blur-sm"
+          title="查看老师讲到哪了"
+        >
+          📍
         </button>
       )}
     </div>

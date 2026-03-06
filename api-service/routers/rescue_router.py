@@ -51,3 +51,35 @@ async def emergency_rescue():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"救场失败: {str(e)}")
+
+
+@router.post("/catchup")
+async def catchup():
+    """
+    老师讲到哪了 - 获取当前课堂进度摘要
+    - 读取到目前为止的全部转录文本
+    - 读取课程资料
+    - 调用 LLM 总结课程进度和重要信息
+    """
+    try:
+        recent_transcript = transcript_service.get_recent_transcript(minutes=10)
+        class_material = transcript_service.get_class_material()
+
+        if not recent_transcript:
+            return {
+                "status": "warning",
+                "summary": "暂无课堂记录，请先开始摸鱼模式。"
+            }
+
+        result = await llm_service.analyze_catchup(
+            transcript=recent_transcript,
+            material=class_material
+        )
+
+        return {
+            "status": "success",
+            **result
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取进度失败: {str(e)}")

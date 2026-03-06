@@ -7,8 +7,7 @@
 import os
 from datetime import datetime, timedelta
 
-# data 目录路径
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
+from config import DATA_DIR
 
 
 class TranscriptService:

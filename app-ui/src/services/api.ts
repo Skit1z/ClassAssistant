@@ -76,6 +76,18 @@ export async function generateSummary(): Promise<{
 }
 
 /**
+ * 老师讲到哪了 - 获取课堂进度摘要
+ */
+export async function catchup(): Promise<{
+  status: string;
+  summary: string;
+}> {
+  const res = await fetch(`${API_BASE}/catchup`, { method: "POST" });
+  if (!res.ok) throw new Error("获取进度失败");
+  return res.json();
+}
+
+/**
  * 更新自定义关键词
  */
 export async function updateKeywords(keywords: string[]): Promise<{

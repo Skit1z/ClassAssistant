@@ -328,39 +328,40 @@ class SeedASR(BaseASR):
     @staticmethod
     def _parse_server_response(data: bytes) -> Optional[dict]:
         """解析 full server response，返回 JSON payload 或 None"""
-        if len(data) < 4:
-            return None
-
-        b1 = data[1]
-        msg_type = (b1 >> 4) & 0xF
-
-        if msg_type == 0xF:
-            # error message
-            if len(data) >= 12:
-                err_code = struct.unpack(">I", data[4:8])[0]
-                err_size = struct.unpack(">I", data[8:12])[0]
-                err_msg = data[12:12 + err_size].decode("utf-8", errors="replace")
-                logger.error("[SeedASR] server error %d: %s", err_code, err_msg)
-            return None
-
-        if msg_type != 0x9:
-            return None
-
-        b2 = data[2]
-        compress = b2 & 0xF
-
-        # sequence (4 bytes) + payload_size (4 bytes)
-        if len(data) < 12:
-            return None
-        payload_size = struct.unpack(">I", data[8:12])[0]
-        payload_raw = data[12:12 + payload_size]
-
-        if compress == 0x1:
-            payload_raw = gzip.decompress(payload_raw)
-
         try:
+            if len(data) < 4:
+                return None
+
+            b1 = data[1]
+            msg_type = (b1 >> 4) & 0xF
+
+            if msg_type == 0xF:
+                # error message
+                if len(data) >= 12:
+                    err_code = struct.unpack(">I", data[4:8])[0]
+                    err_size = struct.unpack(">I", data[8:12])[0]
+                    err_msg = data[12:12 + err_size].decode("utf-8", errors="replace")
+                    logger.error("[SeedASR] server error %d: %s", err_code, err_msg)
+                return None
+
+            if msg_type != 0x9:
+                return None
+
+            b2 = data[2]
+            compress = b2 & 0xF
+
+            # sequence (4 bytes) + payload_size (4 bytes)
+            if len(data) < 12:
+                return None
+            payload_size = struct.unpack(">I", data[8:12])[0]
+            payload_raw = data[12:12 + payload_size]
+
+            if compress == 0x1:
+                payload_raw = gzip.decompress(payload_raw)
+
             return json.loads(payload_raw)
-        except json.JSONDecodeError:
+        except Exception:
+            logger.exception("[SeedASR] failed to parse server response")
             return None
 
     def start(self):
@@ -370,8 +371,41 @@ class SeedASR(BaseASR):
         self._thread.start()
         logger.info("[SeedASR] started")
 
+    def _process_response(self, resp_data):
+        """处理单条服务端响应，提取文本并回调"""
+        if not isinstance(resp_data, bytes):
+            return
+        try:
+            resp = self._parse_server_response(resp_data)
+            if resp and isinstance(resp.get("result"), dict):
+                text = resp["result"].get("text", "")
+                if text:
+                    logger.info("[SeedASR] 识别文本: %s", text[:80])
+                    self.on_text(text, True)
+        except Exception:
+            logger.exception("[SeedASR] error processing server response")
+
+    def _recv_loop(self):
+        """独立接收线程：持续读取服务端响应"""
+        import websocket
+        while not self._stop_event.is_set():
+            try:
+                if self._ws is None:
+                    break
+                resp_data = self._ws.recv()
+                self._process_response(resp_data)
+            except (websocket.WebSocketTimeoutException, TimeoutError):
+                continue
+            except websocket.WebSocketConnectionClosedException:
+                logger.info("[SeedASR] connection closed by server")
+                break
+            except Exception:
+                if not self._stop_event.is_set():
+                    logger.exception("[SeedASR] recv error")
+                break
+
     def _run(self):
-        """工作线程：建连 → 发送 full request → 流式推音频 → 接收结果"""
+        """工作线程：建连 → 发送 full request → 流式推音频（接收在独立线程）"""
         import websocket  # websocket-client 库
 
         app_key = os.getenv("SEED_ASR_APP_KEY", "")
@@ -391,14 +425,16 @@ class SeedASR(BaseASR):
             "X-Api-Connect-Id": connect_id,
         }
 
-        logger.info("[SeedASR] connecting with resource_id=%s", resource_id)
+        logger.info("[SeedASR] connecting to %s (resource_id=%s)", self.WS_URL, resource_id)
 
+        recv_thread = None
         try:
             self._ws = websocket.create_connection(
                 self.WS_URL,
                 header=[f"{k}: {v}" for k, v in headers.items()],
                 timeout=10,
             )
+            logger.info("[SeedASR] websocket connected")
 
             # 1) 发送 full client request
             full_req_payload = {
@@ -422,9 +458,14 @@ class SeedASR(BaseASR):
             ack = self._ws.recv()
             if isinstance(ack, bytes):
                 resp = self._parse_server_response(ack)
-                logger.debug("[SeedASR] full request ack: %s", resp)
+                logger.info("[SeedASR] full request ack: %s", resp)
 
-            # 2) 开启麦克风，循环发送音频帧
+            # 2) 启动独立接收线程
+            self._ws.settimeout(1)  # recv 线程每秒检查一次 stop_event
+            recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
+            recv_thread.start()
+
+            # 3) 开启麦克风，循环发送音频帧
             self._mic = pyaudio.PyAudio()
             self._stream = self._mic.open(
                 format=pyaudio.paInt16,
@@ -434,38 +475,26 @@ class SeedASR(BaseASR):
                 frames_per_buffer=CHUNK_SIZE,
             )
 
+            logger.info("[SeedASR] microphone opened, streaming audio...")
+
             while not self._stop_event.is_set():
                 audio_data = self._stream.read(CHUNK_SIZE, exception_on_overflow=False)
-                self._ws.send(self._build_audio_frame(audio_data, is_last=False), opcode=0x2)
-
-                # 尝试非阻塞读取响应
-                self._ws.settimeout(0.01)
                 try:
-                    resp_data = self._ws.recv()
-                    if isinstance(resp_data, bytes):
-                        resp = self._parse_server_response(resp_data)
-                        if resp and "result" in resp:
-                            text = resp["result"].get("text", "")
-                            if text:
-                                self.on_text(text, True)
-                except websocket.WebSocketTimeoutException:
-                    pass
+                    self._ws.send(self._build_audio_frame(audio_data, is_last=False), opcode=0x2)
+                except Exception:
+                    if not self._stop_event.is_set():
+                        logger.exception("[SeedASR] send error")
+                    break
 
-            # 3) 发送最后一帧（负包）
-            self._ws.send(self._build_audio_frame(b"", is_last=True), opcode=0x2)
-
-            # 读取最终结果
-            self._ws.settimeout(5)
+            # 4) 发送最后一帧（负包）
             try:
-                final = self._ws.recv()
-                if isinstance(final, bytes):
-                    resp = self._parse_server_response(final)
-                    if resp and "result" in resp:
-                        text = resp["result"].get("text", "")
-                        if text:
-                            self.on_text(text, True)
+                self._ws.send(self._build_audio_frame(b"", is_last=True), opcode=0x2)
             except Exception:
                 pass
+
+            # 等待接收线程处理完最终结果
+            if recv_thread and recv_thread.is_alive():
+                recv_thread.join(timeout=5)
 
         except Exception:
             logger.exception("[SeedASR] connection/stream error")
@@ -476,10 +505,15 @@ class SeedASR(BaseASR):
             if self._mic:
                 self._mic.terminate()
             if self._ws:
-                self._ws.close()
+                try:
+                    self._ws.close()
+                except Exception:
+                    pass
             self._stream = None
             self._mic = None
             self._ws = None
+            if recv_thread and recv_thread.is_alive():
+                recv_thread.join(timeout=2)
 
     def stop(self):
         self._running = False

@@ -9,13 +9,12 @@ from services.llm_service import LLMService
 from services.transcript_service import TranscriptService
 import os
 from datetime import datetime
+from config import DATA_DIR
 
 router = APIRouter()
 
 llm_service = LLMService()
 transcript_service = TranscriptService()
-
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 
 
 @router.post("/generate_summary")

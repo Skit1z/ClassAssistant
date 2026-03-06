@@ -97,6 +97,48 @@ class LLMService:
                 "answer": "请检查 API 配置是否正确"
             }
 
+    async def analyze_catchup(self, transcript: str, material: str) -> dict:
+        """
+        课堂进度摘要 - 告知用户老师讲到哪了、有什么重要信息
+
+        Args:
+            transcript: 最近的课堂转录文本
+            material: 课程 PPT 资料文本
+
+        Returns:
+            包含 summary 的字典
+        """
+        system_prompt = """你是一个大学课堂助手。学生正在上课但没有认真听，现在想知道老师讲到哪了。
+请根据课堂录音转录和课程资料，简洁地总结：
+1. 老师目前讲到了什么内容
+2. 有没有重要的知识点、考试重点或需要注意的事项
+3. 如果有布置作业或提到截止日期，也请标出
+
+请用简洁易读的中文回复，不要太长，控制在200字以内。"""
+
+        user_prompt = f"""【课堂录音转录】
+{transcript}
+
+【课程资料（PPT内容）】
+{material if material else "暂无课程资料"}
+
+请总结老师讲到哪了。"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500,
+            )
+            content = response.choices[0].message.content.strip()
+            return {"summary": content}
+        except Exception as e:
+            return {"summary": f"LLM 调用失败: {str(e)}，请检查 API 配置"}
+
     async def generate_class_summary(self, transcript: str, material: str) -> str:
         """
         生成课后总结 Markdown 笔记
