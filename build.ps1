@@ -13,13 +13,9 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ---------- 配置（按需修改） ----------
-$CONDA_ENV = "class-assistant"
-# 自动检测 conda 路径，检测不到则用默认值
-if ($env:CONDA_EXE) {
-    $CONDA_ACTIVATE = Join-Path (Split-Path (Split-Path $env:CONDA_EXE)) "Scripts\activate.bat"
-} else {
-    $CONDA_ACTIVATE = "F:\MyProgram\Anaconda3\Scripts\activate.bat"
-}
+$VENV_DIR = Join-Path $PSScriptRoot "api-service\.venv"
+$VENV_PYTHON = Join-Path $VENV_DIR "Scripts\python.exe"
+$VENV_PYINSTALLER = Join-Path $VENV_DIR "Scripts\pyinstaller.exe"
 # --------------------------------------
 
 $VER_NUM = $Version -replace '^[vV]', ''
@@ -61,19 +57,33 @@ $content = $content -replace '(?m)^version\s*=\s*"[^"]+"', "version = `"$VER_NUM
 Write-Host "      version 已更新" -ForegroundColor Green
 
 # ================================================
-# [2/6] 打包后端（PyInstaller + conda）
+# [2/6] 打包后端（PyInstaller + .venv）
 # ================================================
 Write-Host ""
 Write-Host "[2/6] 打包后端 (PyInstaller) ..." -ForegroundColor Yellow
 
+# 检查 .venv 是否存在
+if (-not (Test-Path $VENV_PYINSTALLER)) {
+    Write-Host "[错误] 找不到 .venv 环境！请先运行: python -m venv api-service\.venv 并安装依赖" -ForegroundColor Red
+    exit 1
+}
+
 # 构建期间去掉 tesseract 路径，避免 PyInstaller 拾取损坏的 libfribidi-0.dll
-$cleanPath = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'tesseract' }) -join ';'
-$buildCmd = "set PATH=$cleanPath && cd /d `"$API_DIR`" && call `"$CONDA_ACTIVATE`" && call conda activate $CONDA_ENV && pyinstaller backend.spec --clean --noconfirm"
-cmd /c $buildCmd
-if ($LASTEXITCODE -ne 0) {
+$origPath = $env:PATH
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'tesseract' }) -join ';'
+
+Push-Location $API_DIR
+try {
+    & $VENV_PYINSTALLER backend.spec --clean --noconfirm
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+} catch {
+    Pop-Location
+    $env:PATH = $origPath
     Write-Host "[错误] 后端打包失败！" -ForegroundColor Red
     exit 1
 }
+Pop-Location
+$env:PATH = $origPath
 
 Write-Host "      后端打包完成" -ForegroundColor Green
 

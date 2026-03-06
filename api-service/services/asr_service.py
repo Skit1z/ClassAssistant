@@ -1,7 +1,8 @@
 """
 ASR 语音识别服务
 ================
-支持三种模式：
+支持四种模式：
+  - local:     免费语音识别（Google Speech API，无需密钥，需联网）
   - mock:      空实现，用于开发测试
   - dashscope: 阿里云百炼 Fun-ASR 实时语音识别
   - seed-asr:  字节跳动 Seed-ASR 大模型语音识别
@@ -61,6 +62,90 @@ class MockASR(BaseASR):
     def stop(self):
         self._running = False
         logger.info("[MockASR] stopped")
+
+
+# =====================================================================
+# 本地免费 ASR 实现（Google Speech API，无需密钥）
+# =====================================================================
+
+class LocalASR(BaseASR):
+    """
+    本地免费 ASR - 使用 SpeechRecognition + Google 免费语音识别 API
+    无需任何 API 密钥，需要联网。
+    以分段方式识别：录音至静音 → 发送识别 → 返回结果。
+    """
+
+    def __init__(self, on_text: Callable[[str, bool], None]):
+        super().__init__(on_text)
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+
+    def start(self):
+        self._running = True
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info("[LocalASR] started")
+
+    def _run(self):
+        """工作线程：持续监听麦克风，分段识别"""
+        import speech_recognition as sr
+
+        recognizer = sr.Recognizer()
+        # 降低能量阈值 & 加快停顿判定，提升响应速度
+        recognizer.energy_threshold = 300
+        recognizer.dynamic_energy_threshold = True
+        recognizer.pause_threshold = 0.8
+
+        mic = sr.Microphone(sample_rate=SAMPLE_RATE)
+
+        try:
+            with mic as source:
+                recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                logger.info("[LocalASR] ambient noise adjusted, listening...")
+
+                while not self._stop_event.is_set():
+                    try:
+                        audio = recognizer.listen(
+                            source,
+                            timeout=5,            # 最长等待 5 秒
+                            phrase_time_limit=15,  # 单段最长 15 秒
+                        )
+                    except sr.WaitTimeoutError:
+                        continue
+
+                    if self._stop_event.is_set():
+                        break
+
+                    # 在子线程中异步识别，避免阻塞监听循环
+                    threading.Thread(
+                        target=self._recognize,
+                        args=(recognizer, audio),
+                        daemon=True,
+                    ).start()
+        except Exception:
+            logger.exception("[LocalASR] microphone error")
+
+    def _recognize(self, recognizer, audio):
+        """调用 Google 免费 API 识别一段音频"""
+        import speech_recognition as sr
+        try:
+            text = recognizer.recognize_google(audio, language="zh-CN")
+            if text and self._running:
+                self.on_text(text, True)
+        except sr.UnknownValueError:
+            pass  # 没听清，正常忽略
+        except sr.RequestError as e:
+            logger.error("[LocalASR] Google API error: %s", e)
+        except Exception:
+            logger.exception("[LocalASR] recognition error")
+
+    def stop(self):
+        self._running = False
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        logger.info("[LocalASR] stopped")
 
 
 # =====================================================================
@@ -418,8 +503,10 @@ def create_asr(on_text: Callable[[str, bool], None]) -> BaseASR:
     Returns:
         BaseASR 子类实例
     """
-    mode = os.getenv("ASR_MODE", "mock").lower()
-    if mode == "dashscope":
+    mode = os.getenv("ASR_MODE", "local").lower()
+    if mode == "local":
+        return LocalASR(on_text)
+    elif mode == "dashscope":
         return DashScopeASR(on_text)
     elif mode == "seed-asr":
         return SeedASR(on_text)

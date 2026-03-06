@@ -33,7 +33,7 @@
 ## 📦 环境要求
 
 - **操作系统**: Windows 10/11
-- **Python**: 3.11+ (推荐 Conda 环境)
+- **Python**: 3.11+
 - **Node.js**: 18+
 - **Rust**: 最新稳定版 (Tauri 2.0 需要)
 - **Visual Studio Build Tools**: 2022 (C++ 桌面开发工作负载)
@@ -50,10 +50,9 @@ cd ClassAssistant
 ### 2. 配置 Python 环境
 
 ```bash
-conda create -n class-assistant python=3.11 -y
-conda activate class-assistant
 cd api-service
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
 ```
 
 ### 3. 配置环境变量
@@ -98,8 +97,7 @@ npm install
 终端 1 - 启动后端：
 ```bash
 cd api-service
-conda activate class-assistant
-python -m uvicorn main:app --host 127.0.0.1 --port 8765 --reload
+.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8765 --reload
 ```
 
 终端 2 - 启动前端：

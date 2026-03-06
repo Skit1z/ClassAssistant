@@ -51,3 +51,17 @@ async def root():
 async def health_check():
     """健康检查"""
     return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import sys
+    import uvicorn
+
+    # PyInstaller console=False 时 stdout/stderr 为 None，需重定向防止崩溃
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
+    port = int(os.getenv("API_PORT", "8765"))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
