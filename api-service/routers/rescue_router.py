@@ -5,6 +5,7 @@
 """
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from services.llm_service import LLMService
 from services.transcript_service import TranscriptService
 
@@ -13,6 +14,17 @@ router = APIRouter()
 # 服务实例
 llm_service = LLMService()
 transcript_service = TranscriptService()
+
+
+class CatchupHistoryItem(BaseModel):
+    role: str
+    content: str
+
+
+class CatchupChatRequest(BaseModel):
+    summary: str
+    question: str
+    history: list[CatchupHistoryItem] = []
 
 
 @router.post("/emergency_rescue")
@@ -83,3 +95,24 @@ async def catchup():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取进度失败: {str(e)}")
+
+
+@router.post("/catchup_chat")
+async def catchup_chat(request: CatchupChatRequest):
+    """围绕当前课堂进度继续追问。"""
+    try:
+        recent_transcript = transcript_service.get_recent_transcript(minutes=10)
+        class_material = transcript_service.get_class_material()
+        result = await llm_service.answer_catchup_question(
+            summary=request.summary,
+            transcript=recent_transcript,
+            material=class_material,
+            question=request.question,
+            history=[item.model_dump() for item in request.history],
+        )
+        return {
+            "status": "success",
+            **result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"课堂追问失败: {str(e)}")

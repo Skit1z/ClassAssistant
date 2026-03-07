@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import shutil
 from datetime import datetime, timedelta
 
@@ -82,6 +83,32 @@ class TranscriptService:
 
         with open(self.transcript_path, "r", encoding="utf-8") as f:
             return f.read()
+
+    def get_transcript_metadata(self) -> dict:
+        """从转录文件头部提取课程和资料元数据。"""
+        metadata = {
+            "course_name": "",
+            "material_name": "",
+        }
+
+        if not os.path.exists(self.transcript_path):
+            return metadata
+
+        with open(self.transcript_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line.startswith("课程："):
+                    metadata["course_name"] = line.split("课程：", 1)[1].strip()
+                    continue
+                if line.startswith("参考资料："):
+                    metadata["material_name"] = line.split("参考资料：", 1)[1].strip()
+                    continue
+                if re.match(r"^\[\d{2}:\d{2}:\d{2}\]", line):
+                    break
+
+        return metadata
 
     def get_class_material(self) -> str:
         """获取课程 PPT 资料文本"""

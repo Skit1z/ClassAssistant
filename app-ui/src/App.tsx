@@ -4,7 +4,7 @@
  * 整合所有子组件，管理全局状态
  */
 
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import TitleBar from "./components/TitleBar";
 import ToolBar from "./components/ToolBar";
 import AlertOverlay from "./components/AlertOverlay";
@@ -17,9 +17,11 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import {
   uploadPPT,
   startMonitor,
-  stopMonitor,
-  generateSummary,
+  pauseMonitor,
+  resumeMonitor,
+  stopMonitorWithSummary,
 } from "./services/api";
+import { applyUiStyleSettings, readUiStyleSettings } from "./services/preferences";
 
 // Toast ID 计数器
 let toastId = 0;
@@ -27,6 +29,7 @@ let toastId = 0;
 export default function App() {
   // ---- 状态管理 ----
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showRescuePanel, setShowRescuePanel] = useState(false);
   const [showCatchupPanel, setShowCatchupPanel] = useState(false);
@@ -34,10 +37,15 @@ export default function App() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [citeRefreshToken, setCiteRefreshToken] = useState(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [activeCourseName, setActiveCourseName] = useState("");
 
   // WebSocket 连接
   const { lastAlert, alertActive, connect, disconnect, dismissAlert } =
     useWebSocket();
+
+  useEffect(() => {
+    applyUiStyleSettings(readUiStyleSettings());
+  }, []);
 
   // ---- Toast 管理 ----
   const addToast = useCallback(
@@ -73,27 +81,26 @@ export default function App() {
   );
 
   // ---- 开始/停止摸鱼 ----
-  const handleToggleMonitor = useCallback(async () => {
+  const handleStopMonitor = useCallback(async () => {
     setIsLoading(true);
     try {
-      if (isMonitoring) {
-        // 停止监控
-        await stopMonitor();
-        disconnect();
-        setIsMonitoring(false);
-        addToast("监控已停止", "info");
-        // 恢复小窗口
-        try {
-          const { getCurrentWindow } = await import(
-            "@tauri-apps/api/window"
-          );
-          const { LogicalSize } = await import("@tauri-apps/api/dpi");
-          await getCurrentWindow().setSize(new LogicalSize(320, 80));
-        } catch {
-          /* 忽略窗口操作错误 */
-        }
-      } else {
-        setShowStartMonitorPanel(true);
+      const res = await stopMonitorWithSummary();
+      disconnect();
+      setIsMonitoring(false);
+      setIsPaused(false);
+      setActiveCourseName("");
+      addToast(res.message, "info");
+      if (res.summary?.filename) {
+        addToast(`已自动生成总结: ${res.summary.filename}`, "success");
+      } else if (res.summary_error) {
+        addToast(res.summary_error, "error");
+      }
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const { LogicalSize } = await import("@tauri-apps/api/dpi");
+        await getCurrentWindow().setSize(new LogicalSize(560, 220));
+      } catch {
+        /* 忽略窗口操作错误 */
       }
     } catch (err) {
       addToast(
@@ -103,7 +110,35 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [isMonitoring, connect, disconnect, addToast]);
+  }, [disconnect, addToast]);
+
+  const handleOpenStartMonitor = useCallback(() => {
+    setShowStartMonitorPanel(true);
+  }, []);
+
+  const handlePauseResume = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      if (isPaused) {
+        const res = await resumeMonitor();
+        connect();
+        setIsPaused(false);
+        addToast(res.message, "success");
+      } else {
+        const res = await pauseMonitor();
+        disconnect();
+        setIsPaused(true);
+        addToast(res.message, "info");
+      }
+    } catch (err) {
+      addToast(
+        `操作失败: ${err instanceof Error ? err.message : "未知错误"}`,
+        "error"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isPaused, connect, disconnect, addToast]);
 
   const handleStartMonitorConfirm = useCallback(
     async ({ courseName, citeFilename }: { courseName: string; citeFilename: string | null }) => {
@@ -113,6 +148,8 @@ export default function App() {
       });
       connect();
       setIsMonitoring(true);
+      setIsPaused(false);
+      setActiveCourseName(courseName);
       setShowStartMonitorPanel(false);
       addToast(courseName ? `开始摸鱼模式 🎣 ${courseName}` : "开始摸鱼模式 🎣", "success");
     },
@@ -132,8 +169,9 @@ export default function App() {
 
   // ---- 老师讲到哪了 ----
   const handleCatchup = useCallback(() => {
+    dismissAlert();
     setShowCatchupPanel(true);
-  }, []);
+  }, [dismissAlert]);
 
   // ---- 关闭进度面板 ----
   const handleCloseCatchup = useCallback(() => {
@@ -148,35 +186,22 @@ export default function App() {
     setShowSettingsPanel(false);
   }, []);
 
-  // ---- 课后总结 ----
-  const handleSummary = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await generateSummary();
-      addToast(`笔记已生成: ${res.filename}`, "success");
-    } catch (err) {
-      addToast(
-        `生成失败: ${err instanceof Error ? err.message : "未知错误"}`,
-        "error"
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [addToast]);
-
   return (
-    <div className="app-shell relative h-full w-full overflow-hidden rounded-[var(--window-radius)] border border-white/10 bg-gray-900/80 shadow-2xl backdrop-blur-xl">
+    <div className="app-shell relative h-full w-full overflow-hidden rounded-[var(--window-radius)] border border-white/10 shadow-2xl backdrop-blur-xl">
       {/* 标题栏 */}
-      <TitleBar isMonitoring={isMonitoring} />
+      <TitleBar isMonitoring={isMonitoring} isPaused={isPaused} courseName={activeCourseName} />
 
       {/* 工具栏（非救场/进度模式时显示） */}
       {!showRescuePanel && !showCatchupPanel && !showStartMonitorPanel && !showSettingsPanel && (
         <ToolBar
           isMonitoring={isMonitoring}
+          isPaused={isPaused}
           isLoading={isLoading}
+          courseName={activeCourseName}
           onUpload={handleUpload}
-          onToggleMonitor={handleToggleMonitor}
-          onSummary={handleSummary}
+          onStartMonitor={handleOpenStartMonitor}
+          onStopMonitor={handleStopMonitor}
+          onPauseResume={handlePauseResume}
           onCatchup={handleCatchup}
           onSettings={handleOpenSettings}
         />
@@ -204,9 +229,11 @@ export default function App() {
       {/* 点名警报覆盖层 */}
       <AlertOverlay
         active={alertActive && !showRescuePanel}
+        level={lastAlert?.level ?? "danger"}
         keywords={lastAlert?.keywords ?? []}
         text={lastAlert?.text ?? ""}
         onRescue={handleRescue}
+        onCatchup={handleCatchup}
         onDismiss={dismissAlert}
       />
 

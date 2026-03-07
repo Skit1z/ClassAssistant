@@ -2,21 +2,25 @@
 
 <!-- markdownlint-disable MD033 -->
 <div align="center">
+  <img src="docs/img/logo透明背景.png" alt="ClassAssistant Logo" width="128" />
+  <br />
   <a href="https://github.com/ouyangyipeng/ClassAssistant/stargazers">
     <img src="https://img.shields.io/github/stars/ouyangyipeng/ClassAssistant?style=for-the-badge&logo=github" alt="GitHub stars" />
   </a>
   <a href="https://github.com/ouyangyipeng/ClassAssistant/issues">
     <img src="https://img.shields.io/github/issues/ouyangyipeng/ClassAssistant?style=for-the-badge&logo=github" alt="GitHub issues" />
   </a>
-  <a href="https://github.com/ouyangyipeng/ClassAssistant/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/ouyangyipeng/ClassAssistant?style=for-the-badge" alt="License" />
-  </a>
 </div>
 <!-- markdownlint-enable MD033 -->
 
 > 大学课堂辅助桌面悬浮窗：实时转录、点名预警、一键救场、课后总结。
 
-应用常驻在屏幕角落，通过麦克风监听课堂内容。当识别到“点名”“提问”“签到”等关键词时，立即弹出红色警报；同时可以结合课堂转录和上传的课件资料，调用 LLM 生成救场答案、课堂进度总结和课后笔记。
+### 🚀 v1.0.2 近期优化
+- **UI 界面瘦身**：缩小整体尺寸，调整按钮比例为 8:2，视觉更协调、低调。
+- **设置面板优化**：采用响应式布局，解决保存按钮被遮挡问题，支持前端外观（主题、圆角、透明度）即时微调。
+- **背景主题联动**：优化 Ocean/Forest 等主题色，各组件背景与按钮颜色实现全局同步。
+- **交互逻辑改进**：增加暂停/继续功能，优化窗口展开/收起的动画与尺寸控制。
+- **错误兼容处理**：修复部分 Windows 终端环境下启动时的资源加载报错。
 
 ## 🎬 Demo
 

@@ -9,9 +9,13 @@ import { useState } from "react";
 interface TitleBarProps {
   /** 是否正在监控中 */
   isMonitoring: boolean;
+  /** 是否暂停中 */
+  isPaused: boolean;
+  /** 当前课程名称 */
+  courseName: string;
 }
 
-export default function TitleBar({ isMonitoring }: TitleBarProps) {
+export default function TitleBar({ isMonitoring, isPaused, courseName }: TitleBarProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   /** 关闭窗口 */
@@ -29,7 +33,7 @@ export default function TitleBar({ isMonitoring }: TitleBarProps) {
   return (
     <div
       data-tauri-drag-region
-      className="flex items-center justify-between h-8 px-2 select-none cursor-move"
+      className="flex items-center justify-between h-10 px-3 select-none cursor-move"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -38,8 +42,9 @@ export default function TitleBar({ isMonitoring }: TitleBarProps) {
         <span className="text-sm">🐟</span>
         <span className="font-medium tracking-wide">摸鱼搭子</span>
         {isMonitoring && (
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${isPaused ? "bg-amber-300" : "bg-green-400 animate-pulse"}`} />
         )}
+        {courseName && <span className="max-w-40 truncate text-[11px] text-white/45">{courseName}</span>}
       </div>
 
       {/* 右侧窗口控制按钮 - 悬浮时显示 */}

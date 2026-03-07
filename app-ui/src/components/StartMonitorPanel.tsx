@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { getCiteFiles } from "../services/api";
 
+const LAST_COURSE_NAME_KEY = "class-assistant-last-course-name";
+const LAST_CITE_FILENAME_KEY = "class-assistant-last-cite-filename";
+
 interface StartMonitorPanelProps {
   visible: boolean;
   onClose: () => void;
@@ -26,8 +29,17 @@ export default function StartMonitorPanel({
 
     setLoading(true);
     setError(null);
+    const rememberedCourseName = window.localStorage.getItem(LAST_COURSE_NAME_KEY) || "";
+    const rememberedCiteFilename = window.localStorage.getItem(LAST_CITE_FILENAME_KEY) || "";
+    setCourseName(rememberedCourseName);
+    setCiteFilename(rememberedCiteFilename);
     getCiteFiles()
-      .then((res) => setItems(res.items))
+      .then((res) => {
+        setItems(res.items);
+        if (rememberedCiteFilename && !res.items.some((item) => item.filename === rememberedCiteFilename)) {
+          setCiteFilename("");
+        }
+      })
       .catch((err) => setError(err.message || "获取资料列表失败"))
       .finally(() => setLoading(false));
   }, [visible, refreshToken]);
@@ -39,9 +51,9 @@ export default function StartMonitorPanel({
         const { LogicalSize } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
         if (visible) {
-          await win.setSize(new LogicalSize(460, 320));
+          await win.setSize(new LogicalSize(560, 360));
         } else {
-          await win.setSize(new LogicalSize(320, 80));
+          await win.setSize(new LogicalSize(560, 220));
         }
       } catch {
         /* 忽略窗口操作错误 */
@@ -55,6 +67,8 @@ export default function StartMonitorPanel({
     setSubmitting(true);
     setError(null);
     try {
+      window.localStorage.setItem(LAST_COURSE_NAME_KEY, courseName.trim());
+      window.localStorage.setItem(LAST_CITE_FILENAME_KEY, citeFilename || "");
       await onConfirm({
         courseName: courseName.trim(),
         citeFilename: citeFilename || null,
@@ -71,6 +85,7 @@ export default function StartMonitorPanel({
       <div>
         <h2 className="text-sm font-semibold text-white">准备在什么课摸鱼？</h2>
         <p className="mt-1 text-xs text-white/55">填写课程名并选择可选的参考资料，开始后会写入课堂记录。</p>
+        <p className="mt-1 text-[11px] text-white/40">会自动记住你上次使用的课程名和资料选择。</p>
       </div>
 
       <label className="flex flex-col gap-1">

@@ -56,10 +56,10 @@ export default function RescuePanel({ visible, onClose }: RescuePanelProps) {
         const { LogicalSize } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
         if (visible) {
-          await win.setSize(new LogicalSize(400, 480));
+          await win.setSize(new LogicalSize(520, 500));
         } else {
           // 恢复小窗口
-          await win.setSize(new LogicalSize(320, 80));
+          await win.setSize(new LogicalSize(560, 220));
         }
       } catch (e) {
         console.error("窗口尺寸调整失败:", e);

@@ -6,6 +6,7 @@ LLM 服务
 
 import os
 import logging
+import json
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
@@ -77,7 +78,6 @@ class LLMService:
             content = response.choices[0].message.content.strip()
 
             # 尝试解析 JSON
-            import json
             try:
                 result = json.loads(content)
                 return {
@@ -141,6 +141,62 @@ class LLMService:
             return {"summary": content}
         except Exception as e:
             return {"summary": f"LLM 调用失败: {str(e)}，请检查 API 配置"}
+
+    async def answer_catchup_question(
+        self,
+        summary: str,
+        transcript: str,
+        material: str,
+        question: str,
+        history: list[dict] | None = None,
+    ) -> dict:
+        """围绕当前课堂进度继续追问。"""
+        safe_history = history or []
+        history_text = "\n".join(
+            f"{item.get('role', 'user')}: {item.get('content', '')}"
+            for item in safe_history[-8:]
+            if item.get('content')
+        ) or "暂无历史追问"
+
+        system_prompt = """你是一个课堂随堂答疑助手。你需要基于当前课堂进度摘要、最近课堂转录、课程资料以及已有追问历史，回答学生的后续问题。
+
+要求：
+1. 优先依据给定上下文回答，不要编造课堂里没提过的结论。
+2. 回答要直接、清楚，适合学生边上课边看。
+3. 如果问题是解释术语、公式或概念，可以补充必要背景，但不要长篇展开。
+4. 如果上下文不足，要明确说明“当前课堂上下文不足”，再给出谨慎推断。"""
+
+        user_prompt = f"""【当前课堂进度摘要】
+{summary}
+
+【最近课堂转录】
+{transcript}
+
+【课程资料】
+{material if material else '暂无课程资料'}
+
+【已有追问历史】
+{history_text}
+
+【学生的新问题】
+{question}
+
+请直接回答学生。"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                max_tokens=800,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            return {"answer": content or "当前没有可用回答。"}
+        except Exception as exc:
+            return {"answer": f"LLM 调用失败: {exc}，请检查 API 配置"}
 
     async def generate_class_summary(self, transcript: str, material: str) -> str:
         """

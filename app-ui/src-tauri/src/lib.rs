@@ -8,6 +8,16 @@ fn greet(name: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn cleanup_backend_processes() {
+    let _ = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8765/api/stop_monitor' -Method Post -UseBasicParsing -TimeoutSec 90 | Out-Null } catch {}",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
     let _ = Command::new("taskkill")
         .args(["/IM", "class-assistant-backend.exe", "/F"])
         .stdout(Stdio::null())

@@ -32,6 +32,7 @@ class MonitorService:
     def __init__(self):
         # 关键词文件路径
         self.keywords_path = os.path.join(DATA_DIR, "keywords.txt")
+        self.warning_keywords_path = os.path.join(DATA_DIR, "attention_keywords.txt")
         # 从文件加载关键词
         self._load_keywords()
         # 用户自定义关键词（如自己的名字，通过 API 传入）
@@ -39,6 +40,7 @@ class MonitorService:
 
         # 录音状态
         self.is_monitoring: bool = False
+        self.is_paused: bool = False
 
         # ASR 实例
         self._asr: BaseASR | None = None
@@ -73,12 +75,16 @@ class MonitorService:
         """获取所有关键词（内置 + 自定义）"""
         return self.builtin_keywords + self.custom_keywords
 
+    def get_warning_keywords(self) -> List[str]:
+        """获取黄色提醒关键词。"""
+        return self.builtin_warning_keywords
+
     def update_custom_keywords(self, keywords: List[str]):
         """更新用户自定义关键词"""
         self.custom_keywords = keywords
 
     def _load_keywords(self):
-        """从 data/keywords.txt 加载关键词列表"""
+        """从关键词词表加载红色和黄色提醒词。"""
         if os.path.exists(self.keywords_path):
             with open(self.keywords_path, "r", encoding="utf-8") as f:
                 self.builtin_keywords = [
@@ -93,6 +99,18 @@ class MonitorService:
             ]
             self._save_default_keywords()
 
+        if os.path.exists(self.warning_keywords_path):
+            with open(self.warning_keywords_path, "r", encoding="utf-8") as f:
+                self.builtin_warning_keywords = [
+                    line.strip() for line in f
+                    if line.strip() and not line.startswith("#")
+                ]
+        else:
+            self.builtin_warning_keywords = [
+                "重点", "作业", "截止日期", "组队", "考试", "注意", "小测", "汇报", "deadline",
+            ]
+            self._save_default_warning_keywords()
+
     def _save_default_keywords(self):
         """创建默认关键词文件"""
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -102,10 +120,22 @@ class MonitorService:
             for kw in self.builtin_keywords:
                 f.write(kw + "\n")
 
+    def _save_default_warning_keywords(self):
+        """创建默认黄色提醒词文件"""
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(self.warning_keywords_path, "w", encoding="utf-8") as f:
+            f.write("# 黄色提醒关键词（每行一个）\n")
+            f.write("# 检测到后会提示老师提到了重点/任务/考试等信息\n")
+            for kw in self.builtin_warning_keywords:
+                f.write(kw + "\n")
+
     def reload_keywords(self):
         """重新加载关键词文件"""
         self._load_keywords()
-        return self.get_all_keywords()
+        return {
+            "danger": self.get_all_keywords(),
+            "warning": self.get_warning_keywords(),
+        }
 
     def register_websocket(self, ws: WebSocket):
         """注册 WebSocket 连接"""
@@ -126,23 +156,26 @@ class MonitorService:
         # 清理断开的连接
         self._websockets -= dead_connections
 
-    def _check_keywords(self, text: str) -> List[str]:
-        """
-        检查文本中是否包含监控关键词
-
-        Args:
-            text: ASR 识别出的文本
-
-        Returns:
-            匹配到的关键词列表
-        """
+    def _check_keywords(self, text: str, keywords: List[str]) -> List[str]:
+        """检查文本中是否包含给定关键词列表。"""
         matched = []
-        all_keywords = self.get_all_keywords()
-        for keyword in all_keywords:
-            # 使用正则匹配，支持模糊匹配
+        for keyword in keywords:
             if re.search(re.escape(keyword), text):
                 matched.append(keyword)
         return matched
+
+    def _check_alerts(self, text: str) -> dict[str, List[str]]:
+        """检查红色和黄色提醒词。"""
+        return {
+            "danger": self._check_keywords(text, self.get_all_keywords()),
+            "warning": self._check_keywords(text, self.get_warning_keywords()),
+        }
+
+    def _create_and_start_asr(self):
+        self._asr = create_asr(on_text=self._on_asr_text)
+        if isinstance(self._asr, LocalASR):
+            self._asr.on_text = self._on_local_asr_text
+        self._asr.start()
 
     async def start(self, course_name: str = "", material_name: str = "") -> dict:
         """启动监控服务"""
@@ -150,6 +183,7 @@ class MonitorService:
             return {"status": "already_running", "message": "监控服务已在运行中"}
 
         self.is_monitoring = True
+        self.is_paused = False
 
         # 保存当前事件循环引用，供 ASR 回调使用
         self._loop = asyncio.get_running_loop()
@@ -163,12 +197,46 @@ class MonitorService:
 
         # 创建 ASR 实例并启动
         # 本地 ASR 使用独立的回调（每句新建一行），线上 ASR 使用流式回调
-        self._asr = create_asr(on_text=self._on_asr_text)
-        if isinstance(self._asr, LocalASR):
-            self._asr.on_text = self._on_local_asr_text
-        self._asr.start()
+        self._create_and_start_asr()
 
         return {"status": "started", "message": "开始摸鱼模式 🎣 录音和监控已启动"}
+
+    async def pause(self) -> dict:
+        """暂停监控并释放当前 ASR。"""
+        if not self.is_monitoring:
+            return {"status": "not_running", "message": "监控服务未在运行"}
+
+        if self.is_paused:
+            return {"status": "already_paused", "message": "监控服务已暂停"}
+
+        self.is_paused = True
+
+        if self._asr:
+            self._asr.stop()
+            self._asr = None
+
+        with self._state_lock:
+            if self._partial_line and self._partial_line[1].strip():
+                timestamp, text = self._partial_line
+                appended = self._append_entry_locked(timestamp, text)
+                self._partial_line = None
+                if appended:
+                    self._flush_transcript_file()
+
+        return {"status": "paused", "message": "监控已暂停"}
+
+    async def resume(self) -> dict:
+        """继续监控。"""
+        if not self.is_monitoring:
+            return {"status": "not_running", "message": "监控服务未在运行"}
+
+        if not self.is_paused:
+            return {"status": "not_paused", "message": "监控当前未暂停"}
+
+        self.is_paused = False
+        self._loop = asyncio.get_running_loop()
+        self._create_and_start_asr()
+        return {"status": "resumed", "message": "监控已继续"}
 
     async def stop(self) -> dict:
         """停止监控服务"""
@@ -176,6 +244,7 @@ class MonitorService:
             return {"status": "not_running", "message": "监控服务未在运行"}
 
         self.is_monitoring = False
+        self.is_paused = False
 
         # 停止 ASR
         if self._asr:
@@ -193,7 +262,7 @@ class MonitorService:
             )
             self._flush_transcript_file()
 
-        return {"status": "stopped", "message": "监控已停止"}
+        return {"status": "stopped", "message": "监控已停止", "course_name": self._course_name}
 
     def _reset_session_state(self):
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -344,7 +413,7 @@ class MonitorService:
         本地 ASR 识别回调 - 每识别一句话就追加一行到转录文件。
         不使用流式覆盖逻辑，因为本地 ASR 是分段式识别。
         """
-        if not self.is_monitoring or not text.strip():
+        if not self.is_monitoring or self.is_paused or not text.strip():
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -359,10 +428,13 @@ class MonitorService:
         if not appended:
             return
 
-        matched = self._check_keywords(keyword_text)
+        alerts = self._check_alerts(keyword_text)
+        level = "danger" if alerts["danger"] else "warning"
+        matched = alerts[level]
         if matched and self._loop:
             alert = {
                 "type": "keyword_alert",
+            "level": level,
                 "keywords": matched,
                 "text": self._normalize_text(text),
                 "timestamp": timestamp,
@@ -378,13 +450,14 @@ class MonitorService:
         仅把最终稳定的句子写入转录文件。
         流式修正中的 partial 文本只暂存在内存中，停止监控时再兜底写入一次。
         """
-        if not self.is_monitoring or not text.strip():
+        if not self.is_monitoring or self.is_paused or not text.strip():
             return
 
         timestamp = datetime.now().strftime("%H:%M:%S")
         logger.info("[ASR] on_text (len=%d): %s", len(text), text[:60])
 
         matched: List[str] = []
+        level = ""
         alert_text = ""
 
         with self._state_lock:
@@ -403,12 +476,19 @@ class MonitorService:
 
             if appended_any:
                 alert_text = self._recent_keyword_window_locked()
-                matched = self._check_keywords(alert_text)
+                alerts = self._check_alerts(alert_text)
+                if alerts["danger"]:
+                    level = "danger"
+                    matched = alerts["danger"]
+                elif alerts["warning"]:
+                    level = "warning"
+                    matched = alerts["warning"]
                 self._schedule_summary_locked()
 
         if matched and self._loop:
             alert = {
                 "type": "keyword_alert",
+                "level": level,
                 "keywords": matched,
                 "text": alert_text,
                 "timestamp": timestamp,

@@ -36,6 +36,16 @@ export interface StartMonitorPayload {
   cite_filename?: string | null;
 }
 
+export interface StopMonitorResponse {
+  status: string;
+  message: string;
+  summary?: {
+    filename: string;
+    course_name: string;
+  };
+  summary_error?: string;
+}
+
 /**
  * 启动摸鱼监控模式
  */
@@ -55,6 +65,24 @@ export async function startMonitor(
  * 停止监控
  */
 export async function stopMonitor(): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/stop_monitor`, { method: "POST" });
+  if (!res.ok) throw new Error("停止监控失败");
+  return res.json();
+}
+
+export async function pauseMonitor(): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/pause_monitor`, { method: "POST" });
+  if (!res.ok) throw new Error("暂停监控失败");
+  return res.json();
+}
+
+export async function resumeMonitor(): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/resume_monitor`, { method: "POST" });
+  if (!res.ok) throw new Error("继续监控失败");
+  return res.json();
+}
+
+export async function stopMonitorWithSummary(): Promise<StopMonitorResponse> {
   const res = await fetch(`${API_BASE}/stop_monitor`, { method: "POST" });
   if (!res.ok) throw new Error("停止监控失败");
   return res.json();
@@ -96,6 +124,23 @@ export async function catchup(): Promise<{
 }> {
   const res = await fetch(`${API_BASE}/catchup`, { method: "POST" });
   if (!res.ok) throw new Error("获取进度失败");
+  return res.json();
+}
+
+export async function catchupChat(payload: {
+  summary: string;
+  question: string;
+  history: Array<{ role: string; content: string }>;
+}): Promise<{
+  status: string;
+  answer: string;
+}> {
+  const res = await fetch(`${API_BASE}/catchup_chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("课堂追问失败");
   return res.json();
 }
 

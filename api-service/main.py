@@ -21,7 +21,7 @@ load_dotenv(_dotenv_path)
 app = FastAPI(
     title="上课摸鱼搭子 - 后端服务",
     description="大学课堂辅助工具的后端 API 服务",
-    version="0.1.0"
+    version="1.0.1"
 )
 
 # 配置 CORS，允许 Tauri 前端访问

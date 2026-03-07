@@ -50,6 +50,7 @@ a = Analysis(
         'services.llm_service',
         'services.monitor_service',
         'services.ppt_service',
+        'services.summary_service',
         'services.transcript_service',
         'config',
         'pyaudio',

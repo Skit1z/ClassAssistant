@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 /** 警报消息类型 */
 export interface AlertMessage {
   type: "keyword_alert";
+  level: "danger" | "warning";
   keywords: string[];
   text: string;
   timestamp: string;
@@ -22,10 +23,12 @@ export function useWebSocket() {
   const [alertActive, setAlertActive] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const shouldReconnectRef = useRef(false);
 
   /** 建立 WebSocket 连接 */
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    shouldReconnectRef.current = true;
 
     const ws = new WebSocket(WS_URL);
 
@@ -56,10 +59,11 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       setIsConnected(false);
-      console.log("[WS] 连接断开，5 秒后重连...");
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-      // 自动重连
-      setTimeout(connect, 5000);
+      if (shouldReconnectRef.current) {
+        console.log("[WS] 连接断开，5 秒后重连...");
+        setTimeout(connect, 5000);
+      }
     };
 
     ws.onerror = (err) => {
@@ -72,6 +76,7 @@ export function useWebSocket() {
 
   /** 断开连接 */
   const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false;
     if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     wsRef.current?.close();
     wsRef.current = null;

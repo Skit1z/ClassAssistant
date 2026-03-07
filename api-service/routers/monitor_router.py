@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import List, Optional
 from services.monitor_service import MonitorService
+from services.summary_service import SummaryService
 from services.transcript_service import TranscriptService
 
 router = APIRouter()
@@ -15,6 +16,7 @@ router = APIRouter()
 # 全局监控服务实例
 monitor_service = MonitorService()
 transcript_service = TranscriptService()
+summary_service = SummaryService()
 
 
 class KeywordUpdateRequest(BaseModel):
@@ -60,7 +62,42 @@ async def stop_monitor():
     - 停止 ASR
     """
     result = await monitor_service.stop()
+    if result.get("status") != "stopped":
+        return result
+
+    try:
+        summary_result = await summary_service.generate_summary(
+            course_name=result.get("course_name") or "",
+        )
+        result["summary"] = {
+            "filename": summary_result["filename"],
+            "course_name": summary_result["course_name"],
+        }
+    except ValueError as exc:
+        result["summary_error"] = str(exc)
+    except Exception as exc:
+        result["summary_error"] = f"自动总结失败: {exc}"
+
     return result
+
+
+@router.post("/pause_monitor")
+async def pause_monitor():
+    return await monitor_service.pause()
+
+
+@router.post("/resume_monitor")
+async def resume_monitor():
+    return await monitor_service.resume()
+
+
+@router.get("/monitor_status")
+async def monitor_status():
+    return {
+        "status": "success",
+        "is_monitoring": monitor_service.is_monitoring,
+        "is_paused": monitor_service.is_paused,
+    }
 
 
 @router.post("/update_keywords")
@@ -81,9 +118,11 @@ async def get_keywords():
     """获取当前所有监控关键词"""
     return {
         "builtin": monitor_service.builtin_keywords,
+        "warning": monitor_service.get_warning_keywords(),
         "custom": monitor_service.custom_keywords,
         "all": monitor_service.get_all_keywords(),
         "file": monitor_service.keywords_path,
+        "warning_file": monitor_service.warning_keywords_path,
     }
 
 
@@ -95,6 +134,7 @@ async def reload_keywords():
         "status": "success",
         "keywords": all_kw,
         "file": monitor_service.keywords_path,
+        "warning_file": monitor_service.warning_keywords_path,
     }
 
 
