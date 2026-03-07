@@ -33,15 +33,33 @@
 
 ### 摸鱼监控状态
 
-![摸鱼监控状态](docs/img/%E6%91%B8%E9%B1%BC%E7%8A%B6%E6%80%81.gif)
+<p align="center">
+  <img
+    src="docs/img/%E6%91%B8%E9%B1%BC%E7%8A%B6%E6%80%81.gif"
+    alt="摸鱼监控状态演示"
+    width="860"
+  />
+</p>
 
 ### 点名警报与 AI 救场
 
-![点名警报与 AI 救场](docs/img/%E7%82%B9%E5%90%8D%E8%AD%A6%E6%8A%A5%E4%B8%8Eai%E5%9B%9E%E7%AD%94.gif)
+<p align="center">
+  <img
+    src="docs/img/%E7%82%B9%E5%90%8D%E8%AD%A6%E6%8A%A5%E4%B8%8Eai%E5%9B%9E%E7%AD%94.gif"
+    alt="点名警报与 AI 救场演示"
+    width="860"
+  />
+</p>
 
 ### 老师讲到哪儿了
 
-![老师讲到哪儿了](docs/img/%E8%80%81%E5%B8%88%E8%AE%B2%E5%88%B0%E5%93%AA%E5%84%BF%E4%BA%86.gif)
+<p align="center">
+  <img
+    src="docs/img/%E8%80%81%E5%B8%88%E8%AE%B2%E5%88%B0%E5%93%AA%E5%84%BF%E4%BA%86.gif"
+    alt="老师讲到哪儿了演示"
+    width="860"
+  />
+</p>
 
 ## ✨ 核心功能
 
