@@ -27,7 +27,8 @@ data/summaries/
 # ---- IDE ----
 .vscode/
 .idea/
-
+.claude/
+CLAUDE.md
 # ---- OS ----
 .DS_Store
 Thumbs.db

@@ -50,6 +50,12 @@ source "$HOME/.cargo/env"
 # Ensure rust target is installed
 rustup target add "$TARGET"
 
+# CLEANUP: To avoid "found architecture 'x86_64', required architecture 'arm64'" errors,
+# we must perform a thorough clean when the architecture might have changed.
+echo -e "${GREEN}🧹 Performing deep clean of build cache...${NC}"
+# Deleting the entire target directory is the most reliable way to fix linker issues
+rm -rf "src-tauri/target"
+
 # Run tauri build with specific target
 npm run tauri build -- --target "$TARGET"
 
