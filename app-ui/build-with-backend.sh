@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Build script for ClassFox with embedded backend (Multi-Architecture)
-# Usage: ./build-with-backend.sh [x86_64|arm64]
+# Usage: ./build-with-backend.sh
 
 set -e
 
@@ -9,17 +9,7 @@ set -e
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
-# Detect architecture
-ARCH=${1:-$(uname -m)}
-if [ "$ARCH" == "arm64" ] || [ "$ARCH" == "aarch64" ]; then
-    TARGET="aarch64-apple-darwin"
-    ARCH_LABEL="Apple Silicon (arm64)"
-else
-    TARGET="x86_64-apple-darwin"
-    ARCH_LABEL="Intel (x86_64)"
-fi
-
-echo -e "${GREEN}🚀 Building ClassFox for ${ARCH_LABEL}...${NC}"
+TARGETS=("aarch64-apple-darwin" "x86_64-apple-darwin")
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -43,23 +33,44 @@ cp .env.example "$SCRIPT_DIR/src-tauri/backend/"
 chmod +x "$SCRIPT_DIR/src-tauri/backend/class-assistant-backend"
 
 # Build Tauri app
-echo -e "${GREEN}📦 Building Tauri frontend (${TARGET})...${NC}"
+echo -e "${GREEN}📦 Building Tauri frontend targets...${NC}"
 cd "$SCRIPT_DIR"
-source "$HOME/.cargo/env"
 
-# Ensure rust target is installed
-rustup target add "$TARGET"
+if [ -f "$HOME/.cargo/env" ]; then
+    # Standard rustup install layout.
+    source "$HOME/.cargo/env"
+else
+    # Fallback for environments where rustup installed only the active toolchain.
+    CARGO_BIN="$(dirname "$(rustup which cargo)")"
+    export PATH="$CARGO_BIN:$PATH"
+fi
 
-# CLEANUP: To avoid "found architecture 'x86_64', required architecture 'arm64'" errors,
-# we must perform a thorough clean when the architecture might have changed.
-echo -e "${GREEN}🧹 Performing deep clean of build cache...${NC}"
-# Deleting the entire target directory is the most reliable way to fix linker issues
-rm -rf "src-tauri/target"
+for TARGET in "${TARGETS[@]}"; do
+    if [ "$TARGET" = "aarch64-apple-darwin" ]; then
+        ARCH="arm64"
+        ARCH_LABEL="Apple Silicon (arm64)"
+    else
+        ARCH="x86_64"
+        ARCH_LABEL="Intel (x86_64)"
+    fi
 
-# Run tauri build with specific target
-npm run tauri build -- --target "$TARGET"
+    echo -e "${GREEN}🚀 Building ClassFox for ${ARCH_LABEL}...${NC}"
 
-echo -e "${GREEN}✅ Build complete!${NC}"
-echo "Architecture: ${ARCH_LABEL}"
-echo "App bundle: src-tauri/target/${TARGET}/release/bundle/macos/课狐ClassFox.app"
-echo "DMG: src-tauri/target/${TARGET}/release/bundle/dmg/课狐ClassFox_1.2.0_${ARCH}.dmg"
+    # Ensure rust target is installed
+    rustup target add "$TARGET"
+
+    # Run tauri build with specific target without clearing the shared cache.
+    npm run tauri build -- --target "$TARGET"
+
+    echo -e "${GREEN}✅ Build complete for ${ARCH_LABEL}${NC}"
+    echo "App bundle: src-tauri/target/${TARGET}/release/bundle/macos/课狐ClassFox.app"
+    echo "DMG: src-tauri/target/${TARGET}/release/bundle/dmg/课狐ClassFox_1.2.0_${ARCH}.dmg"
+    echo ""
+done
+
+echo -e "${GREEN}✅ All builds complete!${NC}"
+echo "Built targets:"
+echo "  - src-tauri/target/aarch64-apple-darwin/release/bundle/macos/课狐ClassFox.app"
+echo "  - src-tauri/target/x86_64-apple-darwin/release/bundle/macos/课狐ClassFox.app"
+echo ""
+echo "Note: the embedded Python backend is still built for the current host architecture."

@@ -62,6 +62,19 @@ function MainApp() {
     applyUiStyleSettings(readUiStyleSettings());
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const currentWindow = getCurrentWindow();
+        await currentWindow.setShadow(false);
+        await currentWindow.setBackgroundColor({ red: 0, green: 0, blue: 0, alpha: 0 });
+      } catch {
+        /* 非 Tauri 环境忽略 */
+      }
+    })();
+  }, []);
+
   // ---- Toast 管理 ----
   const addToast = useCallback(
     (text: string, type: ToastMessage["type"] = "info") => {
@@ -74,6 +87,39 @@ function MainApp() {
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const exportMacOsArtifacts = useCallback(
+    async (summaryFilename?: string, courseName?: string) => {
+      const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent.toLowerCase();
+      if (!userAgent.includes("mac")) {
+        return;
+      }
+
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const result = await invoke<{
+          exported: boolean;
+          directory?: string | null;
+          saved_files: string[];
+        }>("export_monitor_artifacts", {
+          summaryFilename: summaryFilename ?? null,
+          courseName: courseName ?? null,
+        });
+
+        if (!result.exported) {
+          addToast("已取消导出目录选择", "info");
+          return;
+        }
+
+        if (result.saved_files.length > 0) {
+          addToast(`已导出到 ${result.directory}`, "success");
+        }
+      } catch {
+        /* 非 Tauri 或非 macOS 环境直接忽略 */
+      }
+    },
+    [addToast]
+  );
 
   // ---- 上传 PPT ----
   const handleUpload = useCallback(
@@ -100,6 +146,7 @@ function MainApp() {
     setIsLoading(true);
     try {
       const res = await stopMonitorWithSummary();
+      const courseNameForExport = res.summary?.course_name || activeCourseName;
       disconnect();
       setIsMonitoring(false);
       setIsPaused(false);
@@ -110,6 +157,7 @@ function MainApp() {
       } else if (res.summary_error) {
         addToast(res.summary_error, "error");
       }
+      await exportMacOsArtifacts(res.summary?.filename, courseNameForExport);
       try {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const { LogicalSize } = await import("@tauri-apps/api/dpi");
@@ -125,7 +173,7 @@ function MainApp() {
     } finally {
       setIsLoading(false);
     }
-  }, [disconnect, addToast]);
+  }, [activeCourseName, disconnect, addToast, exportMacOsArtifacts]);
 
   const handleOpenStartMonitor = useCallback(() => {
     setShowStartMonitorPanel(true);
@@ -202,7 +250,7 @@ function MainApp() {
   }, []);
 
   return (
-    <div className="app-shell relative h-full w-full overflow-hidden rounded-[var(--window-radius)] border border-[var(--theme-shell-border)] shadow-2xl backdrop-blur-xl">
+    <div className="app-shell relative h-full w-full overflow-hidden rounded-[var(--window-radius)] shadow-2xl">
       {/* 标题栏 */}
       <TitleBar isMonitoring={isMonitoring} isPaused={isPaused} courseName={activeCourseName} />
 

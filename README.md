@@ -107,29 +107,22 @@ npm run tauri dev
 # 赋予执行权限
 chmod +x ./app-ui/build-with-backend.sh
 
-# 默认构建 (根据当前机器架构)
+# 默认构建（一次同时构建 arm64 和 x86_64）
 ./app-ui/build-with-backend.sh
-
-# 手动指定架构构建
-./app-ui/build-with-backend.sh x86_64  # Intel 版本
-./app-ui/build-with-backend.sh arm64   # Apple Silicon 版本
 ```
 
 ### 构建产物
 
-- **.app 程序**：`app-ui/src-tauri/target/[TARGET]/release/bundle/macos/课狐ClassFox.app`
-- **DMG 安装包**：`app-ui/src-tauri/target/[TARGET]/release/bundle/dmg/课狐ClassFox_1.2.0_[ARCH].dmg`
+- **arm64 .app**：`app-ui/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/课狐ClassFox.app`
+- **arm64 DMG**：`app-ui/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/课狐ClassFox_1.2.0_arm64.dmg`
+- **x86_64 .app**：`app-ui/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/课狐ClassFox.app`
+- **x86_64 DMG**：`app-ui/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/课狐ClassFox_1.2.0_x86_64.dmg`
 
-### ⚠️ 重要提示：架构切换
+### ⚠️ 重要提示：backend 架构
 
-如果您在同一台机器上交替构建 Intel 和 Apple Silicon 版本，**必须**先清理缓存以避免链接错误：
+脚本现在会复用现有 Rust/Tauri 构建缓存，不会在每次构建前执行 `cargo clean` 或删除 `src-tauri/target`。
 
-```bash
-cd app-ui/src-tauri
-cargo clean
-cd ../..
-./app-ui/build-with-backend.sh [目标架构]
-```
+但嵌入到 App Bundle 中的 Python backend 仍然按当前宿主机架构构建；如果你要交付“前后端都严格匹配”的双架构安装包，仍然需要分别在对应架构环境下准备 backend。
 
 ## 🎙️ ASR 模式说明
 

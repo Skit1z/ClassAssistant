@@ -163,7 +163,7 @@ export default function SettingsPanel({ visible, onClose, onSaved }: SettingsPan
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const { LogicalSize } = await import("@tauri-apps/api/dpi");
         const win = getCurrentWindow();
-        await win.setSize(new LogicalSize(480, 520));
+        await win.setSize(new LogicalSize(520, 620));
       } catch {
         /* 忽略窗口操作错误 */
       }
@@ -193,17 +193,17 @@ export default function SettingsPanel({ visible, onClose, onSaved }: SettingsPan
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden p-4 text-white/85 animate-in fade-in duration-300">
+    <div className="animate-in fade-in flex h-full flex-col overflow-hidden px-4 pb-4 pt-4 text-white/85 duration-300">
       <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2">
         <h2 className="text-sm font-semibold text-white">系统设置</h2>
         {path && <p className="text-[10px] text-white/35 truncate max-w-[200px]">{path}</p>}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col relative">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
         {loading ? (
           <div className="flex flex-1 items-center justify-center py-10 text-sm text-white/55">正在读取设置...</div>
         ) : (
-          <div className="flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-white/10 pb-24">
+          <div className="scrollbar-thin scrollbar-thumb-white/10 flex-1 space-y-3 overflow-y-auto pb-1 pr-1">
             {ENV_SECTIONS.map((section) => (
               <section key={section.title} className="rounded-[var(--window-radius)] border border-white/10 bg-white/6 p-3">
                 <h3 className="mb-2 text-[11px] font-semibold text-white/90">{section.title}</h3>
@@ -316,20 +316,23 @@ export default function SettingsPanel({ visible, onClose, onSaved }: SettingsPan
           </div>
         )}
 
-        {error && <div className="absolute bottom-20 left-0 right-0 rounded-lg border border-red-500/30 bg-red-500/15 px-2 py-1 text-[10px] text-red-200">⚠️ {error}</div>}
+        {error && <div className="rounded-lg border border-red-500/30 bg-red-500/15 px-2 py-1 text-[10px] text-red-200">⚠️ {error}</div>}
 
-        <div className="absolute bottom-3 left-0 right-0 flex items-center justify-end gap-2 rounded-xl border border-white/10 bg-[#1a1c1e]/96 px-3 py-3 shadow-[0_-12px_24px_rgba(0,0,0,0.18)] mt-auto">
+        <div
+          className="mt-auto flex shrink-0 items-center justify-end gap-3 rounded-2xl border border-white/14 bg-[linear-gradient(180deg,rgba(20,24,29,0.98),rgba(12,17,23,0.98))] px-4 py-4 shadow-[0_-12px_28px_rgba(0,0,0,0.28)]"
+          style={{ marginBottom: "calc(env(safe-area-inset-bottom, 0px) + 6px)" }}
+        >
           <button
             onClick={onClose}
             disabled={saving}
-            className="rounded-lg bg-white/8 px-4 py-1.5 text-xs text-white/70 transition hover:bg-white/14 hover:text-white disabled:opacity-50"
+            className="rounded-xl border border-white/14 bg-white/10 px-5 py-2 text-sm font-medium text-white/88 transition hover:bg-white/16 disabled:opacity-50"
           >
             取消
           </button>
           <button
             onClick={handleSave}
             disabled={saving || loading}
-            className="rounded-lg bg-cyan-500/20 px-4 py-1.5 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/30 disabled:opacity-50"
+            className="rounded-xl border border-cyan-300/24 bg-cyan-400/26 px-5 py-2 text-sm font-semibold text-cyan-50 shadow-[0_10px_24px_rgba(34,211,238,0.16)] transition hover:bg-cyan-400/34 disabled:opacity-50"
           >
             {saving ? "保存中..." : "保存设置"}
           </button>

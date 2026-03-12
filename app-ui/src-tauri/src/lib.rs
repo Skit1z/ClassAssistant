@@ -4,7 +4,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     process::{Child, Command, Stdio},
     sync::{LazyLock, Mutex},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     fs, path::{Path, PathBuf},
 };
 
@@ -25,6 +25,13 @@ struct BackendBootstrapResult {
     message: String,
 }
 
+#[derive(Serialize)]
+struct ExportMonitorArtifactsResult {
+    exported: bool,
+    directory: Option<String>,
+    saved_files: Vec<String>,
+}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -36,6 +43,185 @@ fn build_bootstrap_result(status: &str, message: impl Into<String>) -> BackendBo
         status: status.to_string(),
         message: message.into(),
     }
+}
+
+fn build_export_result(
+    exported: bool,
+    directory: Option<String>,
+    saved_files: Vec<String>,
+) -> ExportMonitorArtifactsResult {
+    ExportMonitorArtifactsResult {
+        exported,
+        directory,
+        saved_files,
+    }
+}
+
+fn sanitize_filename_component(name: &str) -> String {
+    let mut sanitized = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if matches!(ch, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+            sanitized.push('_');
+        } else if ch.is_whitespace() {
+            sanitized.push('_');
+        } else {
+            sanitized.push(ch);
+        }
+    }
+
+    let trimmed = sanitized.trim_matches(|ch| ch == '_' || ch == '.');
+    if trimmed.is_empty() {
+        "课堂记录".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn fallback_export_stem(course_name: Option<&str>) -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    format!(
+        "{}_{}",
+        sanitize_filename_component(course_name.unwrap_or("课堂记录")),
+        timestamp
+    )
+}
+
+#[cfg(debug_assertions)]
+fn resolve_backend_data_dir() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(|path| path.join("data"))
+        .ok_or_else(|| "开发环境下无法解析 data 目录".to_string())
+}
+
+#[cfg(not(debug_assertions))]
+fn resolve_backend_data_dir() -> Result<PathBuf, String> {
+    let app_root = current_app_root()?;
+    app_root
+        .parent()
+        .map(|contents_dir| contents_dir.join("Resources").join("data"))
+        .ok_or_else(|| "发布环境下无法解析 Resources/data 目录".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_documents_dir() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join("Documents"))
+        .ok_or_else(|| "无法定位 Documents 目录".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn escape_applescript(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(target_os = "macos")]
+fn choose_export_directory(default_dir: &Path) -> Result<Option<PathBuf>, String> {
+    let script = format!(
+        "set chosenFolder to choose folder with prompt \"请选择录音结束后的保存目录\" default location (POSIX file \"{}\")\nPOSIX path of chosenFolder",
+        escape_applescript(&default_dir.display().to_string())
+    );
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|err| format!("打开目录选择框失败: {err}"))?;
+
+    if output.status.success() {
+        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if selected.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(PathBuf::from(selected)));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("User canceled") || stderr.contains("(-128)") {
+        return Ok(None);
+    }
+
+    Err(format!("目录选择失败: {}", stderr.trim()))
+}
+
+fn copy_file_to_directory(source: &Path, target_dir: &Path, target_name: &str) -> Result<(), String> {
+    let target_path = target_dir.join(target_name);
+    fs::copy(source, &target_path).map_err(|err| {
+        format!(
+            "复制文件失败: {} -> {} ({err})",
+            source.display(),
+            target_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn export_monitor_artifacts(
+    summary_filename: Option<String>,
+    course_name: Option<String>,
+) -> Result<ExportMonitorArtifactsResult, String> {
+    let default_dir = resolve_documents_dir()?;
+    let Some(target_dir) = choose_export_directory(&default_dir)? else {
+        return Ok(build_export_result(false, None, Vec::new()));
+    };
+
+    fs::create_dir_all(&target_dir)
+        .map_err(|err| format!("创建目标目录失败 {}: {err}", target_dir.display()))?;
+
+    let data_dir = resolve_backend_data_dir()?;
+    let transcript_path = data_dir.join("class_transcript.txt");
+    let summary_path = summary_filename
+        .as_ref()
+        .map(|name| data_dir.join("summaries").join(name));
+
+    let export_stem = summary_filename
+        .as_ref()
+        .and_then(|name| Path::new(name).file_stem())
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback_export_stem(course_name.as_deref()));
+
+    let mut saved_files = Vec::new();
+
+    if transcript_path.exists() {
+        let transcript_name = format!("{export_stem}_转录.txt");
+        copy_file_to_directory(&transcript_path, &target_dir, &transcript_name)?;
+        saved_files.push(transcript_name);
+    }
+
+    if let (Some(summary_name), Some(summary_source)) = (summary_filename.as_ref(), summary_path.as_ref()) {
+        if summary_source.exists() {
+            copy_file_to_directory(summary_source, &target_dir, summary_name)?;
+            saved_files.push(summary_name.clone());
+        }
+    }
+
+    if saved_files.is_empty() {
+        return Err("未找到可导出的转录或总结文件".to_string());
+    }
+
+    Ok(build_export_result(
+        true,
+        Some(target_dir.display().to_string()),
+        saved_files,
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn export_monitor_artifacts(
+    _summary_filename: Option<String>,
+    _course_name: Option<String>,
+) -> Result<ExportMonitorArtifactsResult, String> {
+    Ok(build_export_result(false, None, Vec::new()))
 }
 
 #[cfg(not(debug_assertions))]
@@ -351,7 +537,7 @@ fn cleanup_backend_processes(_graceful_stop: bool) {}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, export_monitor_artifacts])
         .setup(|app| {
             let app_handle = app.handle().clone();
 

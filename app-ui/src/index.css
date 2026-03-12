@@ -45,6 +45,7 @@ body {
 
 #root {
 	border-radius: var(--window-radius);
+	isolation: isolate;
 }
 
 .app-shell {
@@ -52,7 +53,12 @@ body {
 	background-color: rgba(7, 15, 28, var(--app-shell-opacity));
 	background-image: var(--app-bg-gradient);
 	background-blend-mode: overlay;
-	border-color: var(--theme-shell-border);
+	background-clip: padding-box;
+	isolation: isolate;
+	overflow: hidden;
+	box-shadow:
+		inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+		0 24px 70px rgba(0, 0, 0, 0.34);
 }
 
 .startup-overlay {
