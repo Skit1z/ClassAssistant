@@ -1,0 +1,38 @@
+[project]
+name = "class-assistant-backend"
+version = "1.2.0"
+description = "Backend for ClassFox - Class Assistant Application"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "python-multipart==0.0.20",
+    "python-pptx==1.0.2",
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+    "pyaudio==0.2.14",
+    "openai==1.58.1",
+    "python-dotenv==1.0.1",
+    "dashscope>=1.20.0",
+    "websocket-client>=1.7.0",
+    "websockets==14.1",
+    "SpeechRecognition>=3.10.0",
+    "aiofiles==24.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+]
+
+[tool.uv.extra-build-dependencies]
+pyaudio = ["setuptools"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
